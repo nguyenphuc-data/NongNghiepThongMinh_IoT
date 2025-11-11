@@ -1,7 +1,7 @@
 import StatsCard from './StatsCard';
 import GaugeChart from './GaugeChart';
 import LineChart from './LineChart';
-import { Thermometer, Droplets, Cloud, Sun, CloudRain } from 'lucide-react';
+import { Thermometer, Droplets, Cloud, Sun, CloudRain, Moon } from 'lucide-react';
 
 export default function Dashboard({ latest, history }) {
   if (!latest) return <div className="text-center py-20 text-white">Đang tải dữ liệu...</div>;
