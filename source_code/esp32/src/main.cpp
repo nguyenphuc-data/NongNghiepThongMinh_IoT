@@ -10,9 +10,9 @@
 #include "sensor/light.h"
 
 // === CẤU HÌNH ===
-const char* ssid = "ONG HUNG_Plus";
-const char* password = "onghung135";
-const char* mqtt_server = "192.168.1.113";  // IP MÁY TÍNH
+const char* ssid = "Quanh";
+const char* password = "11111111";
+const char* mqtt_server = "10.168.187.169";  // IP MÁY TÍNH
 const char* mqtt_topic = "esp32/sensors";
 
 WiFiClient espClient;
