@@ -1,150 +1,147 @@
-// server.js
+// server.js – PHIÊN BẢN HOÀN CHỈNH (có điều khiển bơm + gửi ngay khi pump thay đổi)
 const express = require('express');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const axios = require('axios');          // THÊM DÒNG NÀY
 require('dotenv').config();
-// --- 1. Import Models & Routes ---
-const SensorData = require('./models/SensorData'); // Dữ liệu cảm biến
-const Plant = require('./models/Plant');           // Cây cụ thể
-const plantRoutes = require('./routes/plantRoutes'); // Routes quản lý cây
 
-// --- 2. Cấu hình Cố định & Biến Trạng thái ---
-const PORT = process.env.PORT || 3000; // Sử dụng PORT từ .env
+// --- Import Models & Routes ---
+const SensorData = require('./models/SensorData');
+const Plant = require('./models/Plant');
+const plantRoutes = require('./routes/plantRoutes');
+
+// --- Cấu hình cố định ---
+const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGO_URI;
+const SINGLE_ESP32_KEY = 'esp32_vuonrau';
 
-// KHÓA THIẾT BỊ CỐ ĐỊNH (Theo yêu cầu của bạn)
-const SINGLE_ESP32_KEY = 'esp32_vuonrau'; 
+// Biến toàn cục: ID cây đang được theo dõi
+let CURRENT_ACTIVE_PLANT_ID = null;
 
-// BIẾN TRẠNG THÁI GLOBAL: ID của cây hiện đang được Dashboard theo dõi.
-let CURRENT_ACTIVE_PLANT_ID = null; 
-
-// --- 3. Khởi tạo Ứng dụng & Server ---
+// --- Khởi tạo app & socket.io ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: 'http://localhost:5173', // Thay đổi nếu Front-end chạy ở port khác
+        origin: 'http://localhost:5173',
         methods: ['GET', 'POST']
     }
 });
 
-// --- 4. Middleware ---
-app.use(cors({
-    origin: 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type']
-}));
-app.use(express.json()); // Cho phép Express đọc JSON từ request body
+// --- Middleware ---
+app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(express.json());
 
-// --- 5. Kết nối MongoDB ---
+// --- Kết nối MongoDB ---
 mongoose.connect(MONGODB_URI)
-    .then(() => console.log('✅ Kết nối MongoDB thành công!'))
-    .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
+    .then(() => console.log('Kết nối MongoDB thành công!'))
+    .catch(err => console.error('Lỗi MongoDB:', err));
 
-// --- 6. API Routes (Quản lý Cây) ---
-// Tích hợp routes quản lý cây (GET/POST plants/types)
+// --- Routes ---
 app.use('/api/plants', plantRoutes);
 
-// --- 7. API Endpoint để nhận dữ liệu từ Gateway (HTTP POST) ---
+// ================================================
+// 1. API nhận dữ liệu từ gateway.py (giữ nguyên)
+// ================================================
 app.post('/api/sensor-data', async (req, res) => {
     const data = req.body;
-    const { device_key } = data; // Gateway phải gửi kèm device_key: 'esp32_vuonrau'
+    const { device_key } = data;
 
-    if (!device_key) {
-        return res.status(400).send({ message: 'Missing device_key in payload' });
-    }
-    
-    // B1: Kiểm tra khóa thiết bị
-    if (device_key !== SINGLE_ESP32_KEY) { 
-        console.log(`[POST-IGNORE] Dữ liệu đến từ thiết bị không hợp lệ: ${device_key}`);
-        return res.status(403).send({ message: 'Unauthorized device key' });
+    if (!device_key || device_key !== SINGLE_ESP32_KEY) {
+        return res.status(403).json({ message: 'Unauthorized device' });
     }
 
-    // B2: Kiểm tra trạng thái Active
     if (!CURRENT_ACTIVE_PLANT_ID) {
-        console.log(`[POST-IGNORE] Dữ liệu đến, nhưng không có cây nào Active. Bỏ qua lưu DB.`);
-        return res.status(202).send({ message: 'Data ignored: No active plant selected.' });
+        return res.status(202).json({ message: 'No active plant - data ignored' });
     }
 
     try {
-        // ⭐ LOG DEBUG 1: Kiểm tra payload trước khi lưu
-        console.log(`[DB-CREATE] Payload: ${JSON.stringify(data)}`); 
-        console.log(`[DB-CREATE] Target Plant ID: ${CURRENT_ACTIVE_PLANT_ID}`);
+        const newRecord = await SensorData.create({
+            ...data,
+            plant_id: CURRENT_ACTIVE_PLANT_ID
+        });
 
-        // B3: Lưu dữ liệu vào DB (Gán plant_id đang active)
-        const newRecord = await SensorData.create({ 
-            ...data, 
-            plant_id: CURRENT_ACTIVE_PLANT_ID // Sử dụng ID cây đang active
-        }); 
-        
-        // ⭐ LOG DEBUG 2: Xác nhận bản ghi đã được tạo
-        console.log(`[DB-SUCCESS] Record created with ID: ${newRecord._id}`); 
-        
-        // B4: Phát sóng dữ liệu real-time
-        io.to(CURRENT_ACTIVE_PLANT_ID).emit('new_data', newRecord); 
-        
-        console.log(`[POST-ACTIVE] Logged & broadcasted for Plant ID: ${CURRENT_ACTIVE_PLANT_ID}`);
+        // Phát realtime cho đúng room (cây đang active)
+        io.to(CURRENT_ACTIVE_PLANT_ID).emit('new_data', newRecord);
 
-        res.status(201).send({ message: 'Data logged and broadcasted', data: newRecord });
-    } catch (error) {
-        // ⭐ LOG DEBUG 3: Bắt và in chi tiết lỗi nếu create() thất bại
-        console.error('❌ [DB-FAILURE] Error processing data:', error.message);
-        // Nếu lỗi do validation, chúng ta in ra lỗi chi tiết hơn
-        if (error.name === 'ValidationError') {
-            console.error('❌ [DB-FAILURE] Validation Errors:', error.errors);
+        // Nếu pump vừa thay đổi → phát thêm event riêng để web biết ngay
+        if (data.pump === 'ON' || data.pump === 'OFF') {
+            io.emit('pump_controlled', { state: data.pump, timestamp: new Date() });
         }
-        res.status(500).send({ message: 'Internal Server Error' });
+
+        res.status(201).json({ message: 'Logged & broadcasted', data: newRecord });
+    } catch (error) {
+        console.error('Lỗi lưu dữ liệu:', error.message);
+        res.status(500).json({ message: 'Server error' });
     }
 });
 
-// --- 8. Xử lý Kết nối Socket.IO (Thiết lập Active Plant) ---
+// ================================================
+// 2. API ĐIỀU KHIỂN BƠM TỪ WEB → GỬI LỆNH QUA GATEWAY
+// ================================================
+app.post('/api/control-pump', async (req, res) => {
+    const { state } = req.body; // "ON" hoặc "OFF"
+
+    if (!['ON', 'OFF'].includes(state)) {
+        return res.status(400).json({ error: 'state must be ON or OFF' });
+    }
+
+    try {
+        // Gửi lệnh đến gateway.py (đang chạy FastAPI trên cổng 8000)
+        await axios.post('http://127.0.0.1:8000/control-pump', { state }, { timeout: 3000 });
+
+        console.log(`ĐÃ GỬI LỆNH BƠM: ${state} → ESP32`);
+
+        // Phát realtime cho tất cả client đang xem (không cần đợi ESP32 phản hồi)
+        io.emit('pump_controlled', { state, source: 'web', timestamp: new Date() });
+
+        res.json({ success: true, state });
+    } catch (err) {
+        console.error('Gateway không phản hồi:', err.message);
+        res.status(500).json({ error: 'Không thể điều khiển bơm (Gateway offline)' });
+    }
+});
+
+// ================================================
+// 3. Socket.IO - Quản lý Active Plant + Gửi lịch sử
+// ================================================
 io.on('connection', (socket) => {
     console.log(`Client connected: ${socket.id}`);
-    
-    // Lắng nghe sự kiện khi Front-end chọn Cây khác/Thêm Cây mới.
-    // plantId là ID của cây mà người dùng muốn theo dõi.
-    socket.on('set_active_plant', async (plantId) => {
-        // Kiểm tra xem plantId có phải là một ID hợp lệ (ví dụ: ObjectId) không
-        if (!mongoose.Types.ObjectId.isValid(plantId)) {
-            console.warn(`[SOCKET] Invalid Plant ID received: ${plantId}`);
-            return;
-        }
 
-        // 1. Tắt Active Cũ (Rời khỏi các room cũ)
+    socket.on('set_active_plant', async (plantId) => {
+        if (!mongoose.Types.ObjectId.isValid(plantId)) return;
+
+        // Rời room cũ
         socket.rooms.forEach(room => {
-            if (room !== socket.id) socket.leave(room); 
+            if (room !== socket.id) socket.leave(room);
         });
 
-        // 2. Chuyển Active Mới (Tham gia Room mới)
+        // Tham gia room mới
         socket.join(plantId);
-        console.log(`[SOCKET] Client ${socket.id} set active plant to ID: ${plantId}`);
+        CURRENT_ACTIVE_PLANT_ID = plantId;
+        console.log(`Active plant → ${plantId}`);
 
-        // 3. Cập nhật trạng thái active plant global trên server
-        CURRENT_ACTIVE_PLANT_ID = plantId; 
-        
-        // 4. Gửi 10 bản ghi lịch sử CỦA PLANT ID NÀY
+        // Gửi 10 bản ghi lịch sử gần nhất
         try {
-            const initialData = await SensorData.find({ plant_id: plantId }) 
-                                                .sort({ timestamp: -1 })
-                                                .limit(10);
-            socket.emit('initial_data', initialData.reverse());
-        } catch (error) {
-            console.error('❌ Error fetching initial data:', error);
+            const history = await SensorData.find({ plant_id: plantId })
+                .sort({ timestamp: -1 })
+                .limit(10);
+            socket.emit('initial_data', history.reverse());
+        } catch (err) {
             socket.emit('initial_data', []);
         }
     });
 
     socket.on('disconnect', () => {
         console.log('Client disconnected');
-        
-        // NOTE: Không cần thiết lập CURRENT_ACTIVE_PLANT_ID = null khi 1 client disconnect, 
-        // vì có thể có client khác đang xem. Biến này chỉ được thay đổi khi có lệnh 'set_active_plant'.
+        // Không reset CURRENT_ACTIVE_PLANT_ID vì có thể còn client khác đang xem
     });
 });
 
-// --- 9. Khởi động Server ---
+// --- Khởi động server ---
 server.listen(PORT, () => {
-    console.log(`🌐 Server đang chạy tại http://localhost:${PORT}`);
+    console.log(`Server đang chạy tại http://localhost:${PORT}`);
+    console.log(`→ Điều khiển bơm: POST http://localhost:${PORT}/api/control-pump`);
 });
