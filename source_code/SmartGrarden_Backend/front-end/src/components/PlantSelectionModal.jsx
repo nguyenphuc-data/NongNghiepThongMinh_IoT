@@ -197,11 +197,11 @@ const PlantSelectionModal = ({ isOpen, onClose, onSelect, currentActivePlant, de
         {/* ... phần chọn cây giữ nguyên đẹp như cũ ... */}
         <button onClick={onClose} style={{ position: 'absolute', top: 16, right: 16, width: 40, height: 40, borderRadius: '50%', background: '#f0f0f0', border: 'none', fontSize: '1.6em', fontWeight: '300', color: '#999', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
 
-        <div style={{ padding: '40px 40px 24px', background: '#f8fff9', textAlign: 'center' }}>
+        <div style={{ padding: '20px 20px 12px', background: '#f8fff9', textAlign: 'center' }}>
           <h2 style={{ margin: 0, color: THEME.PRIMARY, fontSize: '1.9em', fontWeight: 900 }}>Chọn Cây Theo Dõi</h2>
         </div>
 
-        <div style={{ padding: '32px 40px 40px', maxHeight: '60vh', overflowY: 'auto' }}>
+        <div style={{ padding: '24px 32px 32px', maxHeight: '60vh', overflowY: 'auto' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
             {plants.length === 0 && !loading && <p style={{ color: '#aaa', fontSize: '1.1em', margin: '60px 0' }}>Chưa có cây nào được thêm</p>}
 
@@ -209,7 +209,7 @@ const PlantSelectionModal = ({ isOpen, onClose, onSelect, currentActivePlant, de
               const isActive = currentActivePlant?._id === plant._id;
               return (
                 <div key={plant._id} onClick={() => { onSelect(plant); onClose(); }}
-                  style={{ width: '100%', maxWidth: 420, padding: '20px 28px', background: '#fff', border: `2px solid ${isActive ? THEME.PRIMARY : '#eee'}`, borderRadius: 24, cursor: 'pointer', boxShadow: '0 8px 25px rgba(0,0,0,0.08)', transition: 'all 0.2s' }}
+                  style={{ width: '100%', maxWidth: 420, padding: '10px 28px', background: '#fff', border: `2px solid ${isActive ? THEME.PRIMARY : '#eee'}`, borderRadius: 24, cursor: 'pointer', boxShadow: '0 8px 25px rgba(0,0,0,0.08)', transition: 'all 0.2s' }}
                   onMouseEnter={e => !isActive && (e.currentTarget.style.borderColor = THEME.PRIMARY)}
                   onMouseLeave={e => !isActive && (e.currentTarget.style.borderColor = '#eee')}>
                   <h3 style={{ margin: 0, fontSize: '1.25em', fontWeight: 'bold', color: '#000' }}>{plant.name}</h3>
@@ -218,13 +218,36 @@ const PlantSelectionModal = ({ isOpen, onClose, onSelect, currentActivePlant, de
               );
             })}
 
-            <button onClick={() => setIsAddingNew(true)}
-              style={{ width: '100%', maxWidth: 420, padding: '20px', background: '#f0fdf4', border: '2px dashed #86efac', borderRadius: 24, fontSize: '1.1em', fontWeight: 'bold', color: '#000', cursor: 'pointer', marginTop: 8, transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#e8f7f3'; e.currentTarget.style.borderColor = THEME.PRIMARY; }}
-              onMouseLeave={e => { e.currentTarget.style.background = '#f0fdf4'; e.currentTarget.style.borderColor = '#86efac'; }}>
-              + Thêm cây mới
-            </button>
           </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+          <button
+            onClick={() => setIsAddingNew(true)}
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              padding: '20px',
+              background: '#f0fdf4',
+              border: '2px dashed #86efac',
+              borderRadius: 24,
+              fontSize: '1.1em',
+              fontWeight: 'bold',
+              color: '#000',
+              cursor: 'pointer',
+              marginTop: 8,
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = '#e8f7f3';
+              e.currentTarget.style.borderColor = THEME.PRIMARY;
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = '#f0fdf4';
+              e.currentTarget.style.borderColor = '#86efac';
+            }}
+          >
+            + Thêm cây mới
+          </button>
         </div>
       </div>
     </div>

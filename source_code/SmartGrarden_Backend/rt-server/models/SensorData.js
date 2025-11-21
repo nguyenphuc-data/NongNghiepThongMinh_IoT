@@ -4,6 +4,7 @@ const sensorSchema = new mongoose.Schema({
     temp: { type: Number, required: true }, 
     hum: { type: Number, required: true }, 
     soil_percent: { type: Number, required: true }, 
+    rain_percent: { type: Number, required: true, min: 0, max: 100 },
     is_raining: { type: Boolean, required: true },
     is_bright: { type: Boolean, required: true },
     pump: { type: String, enum: ['ON', 'OFF'], required: true },
