@@ -5,6 +5,7 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import History from './components/History';
 import PlantSelectionModal from './components/PlantSelectionModal';
+import axios from 'axios';
 import './App.css';
 
 const SOCKET_SERVER_URL = 'http://localhost:3000'; // ← giữ nguyên
@@ -26,7 +27,7 @@ function App() {
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [activePlant, setActivePlant] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(initialState.isLoggedIn && !activePlant);
-
+    const [activePlantType, setActivePlantType] = useState(null);
     // ==================== ĐOẠN NÀY ĐƯỢC COPY NGUYÊN TỪ DASHBOARD.JSX ====================
     const [latestData, setLatestData] = useState({});
     const [historyData, setHistoryData] = useState([]);
@@ -110,10 +111,27 @@ function App() {
         setIsModalOpen(false);
     };
 
-    const selectActivePlantInApp = useCallback((plant) => {
-        setActivePlant(plant);
-        setIsModalOpen(false);
-    }, []);
+const selectActivePlantInApp = useCallback(async (plant) => {
+  setActivePlant(plant);
+  setIsModalOpen(false);
+  setActivePlantType(null); // reset
+
+  const typeId = plant.plant_type_id?._id?.toString();
+
+  if (typeId) {
+    try {
+      const res = await axios.get(`http://localhost:3000/api/plants/types/${typeId}`);
+      setActivePlantType(res.data);
+      console.log("Đã tải loại cây:", res.data);
+    } catch (err) {
+      console.error("Lỗi lấy loại cây:", err.response?.data || err.message);
+      setActivePlantType(null);
+    }
+  } else {
+    console.warn("Không có plant_type_id hoặc _id để gọi API");
+    setActivePlantType(null);
+  }
+}, []);
 
     const renderPage = () => {
         const componentProps = {

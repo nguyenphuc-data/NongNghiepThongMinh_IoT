@@ -1,8 +1,10 @@
-// main.ino – BẢN CUỐI CÙNG, KHÔNG LỖI COMPILE, KHÔNG GURU MEDITATION
+// main.ino – BẢN CUỐI CÙNG + LOG FIRMWARE THẬT 100% (2025)
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
+#include <esp_ota_ops.h>      // ← THÊM DÒNG NÀY
+#include <esp_app_format.h>   // ← THÊM DÒNG NÀY
 
 #define DHT_PIN     21
 #define DHT_TYPE    DHT22
@@ -27,8 +29,29 @@ unsigned long lastCommandTime = 0;
 float currentTemp = -1;
 float currentHum = -1;
 unsigned long lastDHTRead = 0;
+#define FIRMWARE_VERSION "v1.0.0 23112025"    
+// === HÀM IN LOG FIRMWARE THẬT – SIÊU ĐẸP ===
+void printRealFirmwareInfo() {
+  const esp_app_desc_t *app = esp_ota_get_app_description();
 
-// === HÀM TASK ĐỌC DHT – PHẢI ĐẶT TRƯỚC setup() ĐỂ TRÁNH LỖI COMPILE ===
+  Serial.println("\n╔══════════════════════════════════════════════════╗");
+  Serial.println("║             SMART GARDEN ESP32 - 2025            ║");
+  Serial.println("╠══════════════════════════════════════════════════╣");
+  Serial.printf("║ Project Name    : %s\n", app->project_name);
+  Serial.printf("║ Version      : %s\n", FIRMWARE_VERSION);
+  Serial.printf("║ Firmware Version: %s\n", app->version);        // ← THẬT 100%
+  Serial.printf("║ Compile Time    : %s %s\n", app->date, app->time);
+  Serial.printf("║ IDF Version     : %s\n", app->idf_ver);
+  Serial.printf("║ Chip            : %s Rev %d\n", 
+                ESP.getChipModel(), ESP.getChipRevision());
+  Serial.printf("║ Flash Size      : %d MB\n", ESP.getFlashChipSize() / 1024 / 1024);
+  
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  Serial.printf("║ Running Partition: %s (0x%x)\n", running->label, running->address);
+  Serial.println("╚══════════════════════════════════════════════════╝\n");
+}
+
+// === HÀM TASK ĐỌC DHT ===
 void dhtTask(void *pvParameters) {
   for (;;) {
     if (millis() - lastDHTRead >= 3000) {
@@ -38,7 +61,7 @@ void dhtTask(void *pvParameters) {
       if (!isnan(h)) currentHum = round(h * 10) / 10.0;
       lastDHTRead = millis();
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS); // Nghỉ 100ms
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
@@ -46,7 +69,11 @@ void dhtTask(void *pvParameters) {
 void setup() {
   Serial.begin(115200);
   SerialBT.begin("ESP32_VUON_RAU");
-  Serial.println("\n=== ESP32 VUON RAU - BẢN HOÀN HẢO NHẤT 2025 ===");
+
+  // ← IN FIRMWARE THẬT NGAY TỪ ĐẦU!
+  printRealFirmwareInfo();
+
+  Serial.println("=== ESP32 VUON RAU - BẢN HOÀN HẢO NHẤT 2025 ===");
 
   analogSetAttenuation(ADC_11db);
   dht.begin();
@@ -56,15 +83,8 @@ void setup() {
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, HIGH);
 
-  // TẠO TASK ĐỌC DHT TRÊN CORE 0
   xTaskCreatePinnedToCore(
-    dhtTask,      // Hàm
-    "DHT_Task",   // Tên
-    4096,         // Stack (tăng lên 4096 cho chắc)
-    NULL,         // Tham số
-    1,            // Ưu tiên
-    NULL,         // Handle
-    0             // Core 0 (Core 1 dành cho Bluetooth)
+    dhtTask, "DHT_Task", 4096, NULL, 1, NULL, 0
   );
 }
 
@@ -98,7 +118,6 @@ void controlPump(bool on) {
 
 // === LOOP CHÍNH ===
 void loop() {
-  // ĐỌC LỆNH KHÔNG BLOCKING
   while (SerialBT.available()) {
     char c = SerialBT.read();
     if (c == '\n' || c == '\r') {
@@ -120,7 +139,6 @@ void loop() {
     yield();
   }
 
-  // GỬI DỮ LIỆU
   if (pumpState != lastPumpState || millis() - lastSend >= 5000) {
     sendData();
     lastPumpState = pumpState;

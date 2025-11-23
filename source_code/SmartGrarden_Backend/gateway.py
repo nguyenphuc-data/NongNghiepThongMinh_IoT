@@ -1,22 +1,22 @@
-# gateway.py - PHIÊN BẢN HOÀN CHỈNH (có cả đọc dữ liệu + điều khiển bơm)
+# gateway.py – PHIÊN BẢN CUỐI CÙNG, ĐẸP NHẤT VIỆT NAM
 import serial
 import json
-import requests
 import threading
 import time
-from fastapi import FastAPI
-from pydantic import BaseModel
-import uvicorn
+import paho.mqtt.client as mqtt
 
-# =============================================
-# 1. CẤU HÌNH CHUNG
-# =============================================
-COM_PORT = 'COM7'           # Thay bằng COM của bạn (COM7, COM8...)
-BAUD_RATE = 115200
-API_URL = 'http://localhost:3000/api/sensor-data'
+# ==================== CẤU HÌNH ====================
+COM_PORT   = 'COM7'                    # SỬA THEO CỔNG CỦA BẠN
+BAUD_RATE  = 115200
 DEVICE_KEY = 'esp32_vuonrau'
 
-# Kết nối Bluetooth
+MQTT_BROKER = "127.0.0.1"
+MQTT_PORT   = 1883
+
+TOPIC_DATA = f"smartgarden/{DEVICE_KEY}/data"
+TOPIC_CMD  = f"smartgarden/{DEVICE_KEY}/cmd"
+
+# ==================== KẾT NỐI BLUETOOTH ====================
 try:
     ser = serial.Serial(COM_PORT, BAUD_RATE, timeout=1)
     print(f"Bluetooth kết nối thành công: {COM_PORT}")
@@ -24,75 +24,88 @@ except Exception as e:
     print(f"Lỗi kết nối Bluetooth {COM_PORT}: {e}")
     exit()
 
-# =============================================
-# 2. FASTAPI SERVER - NHẬN LỆNH ĐIỀU KHIỂN BƠM
-# =============================================
-app = FastAPI(title="Gateway ESP32 - Control Server")
+# ==================== MQTT CLIENT ====================
+def on_connect(client, userdata, flags, rc, properties=None):
+    if rc == 0:
+        print("ĐÃ KẾT NỐI MQTT → Mosquitto local")
+        client.subscribe(TOPIC_CMD)
+        print(f"Đang nghe lệnh tại: {TOPIC_CMD}")
+    else:
+        print(f"MQTT lỗi: {rc}")
 
-class PumpCommand(BaseModel):
-    state: str  # "ON" hoặc "OFF"
+def on_message(client, userdata, msg):
+    payload = msg.payload.decode()
+    print(f"[MQTT ← WEB] Nhận lệnh: {payload}")
+    if payload.startswith("PUMP:"):
+        ser.write((payload + "\n").encode())
+        print(f"ĐÃ GỬI XUỐNG ESP32: {payload}")
 
-@app.post("/control-pump")
-async def control_pump(cmd: PumpCommand):
-    if cmd.state not in ["ON", "OFF"]:
-        return {"error": "state must be ON or OFF"}
-    
-    command = f"PUMP:{cmd.state}\n"
-    try:
-        ser.write(command.encode('utf-8'))
-        print(f"ĐÃ GỬI LỆNH QUA BLUETOOTH: {command.strip()}")
-        return {"success": True, "sent": command.strip()}
-    except Exception as e:
-        print(f"Lỗi gửi lệnh bơm: {e}")
-        return {"error": str(e)}
+client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+client.on_connect = on_connect
+client.on_message = on_message
+client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+client.loop_start()
 
-# =============================================
-# 3. HÀM ĐỌC DỮ LIỆU TỪ ESP32 → GỬI LÊN SERVER
-# =============================================
+# ==================== ĐỌC DỮ LIỆU TỪ ESP32 ====================
 def bluetooth_reader():
     print("Bắt đầu đọc dữ liệu từ ESP32...")
+    buffer = ""
     while True:
         try:
-            if ser.in_waiting > 0:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
-                if line and line.startswith('{'):
-                    print(f"[BT ← ESP32] {line}")
-                    
+            if ser.in_waiting:
+                raw = ser.readline().decode('utf-8', errors='ignore')
+                line = raw.strip()
+                if not line: continue
+                buffer += line
+
+                if buffer.startswith('{') and '}' in buffer:
+                    json_str = buffer[:buffer.rfind('}')+1]
+                    buffer = buffer[len(json_str):]
+
                     try:
-                        data = json.loads(line)
+                        data = json.loads(json_str)
                         data['device_key'] = DEVICE_KEY
-                        
-                        # Gửi lên Node.js server
-                        response = requests.post(API_URL, json=data, timeout=5)
-                        if response.status_code == 201:
-                            print(f"   [OK] Đã lưu + broadcast: T={data.get('temp')}°C | Bơm={data.get('pump')}")
-                        elif response.status_code == 202:
-                            print("   [INFO] Không có cây active → dữ liệu bị bỏ qua")
-                        else:
-                            print(f"   [WARNING] Server trả về {response.status_code}")
-                            
+                        data['timestamp'] = int(time.time())
+
+                        # LOG ĐỈNH CAO NHẤT VIỆT NAM
+                        temp = data.get('temp', 'N/A')
+                        hum  = data.get('hum', 'N/A')
+                        soil = data.get('soil_percent', 'N/A')
+                        rain = data.get('rain_percent', 'N/A')
+                        is_raining = "Đang mưa" if data.get('is_raining') else "Không mưa"
+                        is_wet     = "Ướt" if data.get('is_soil_wet') else "Khô"
+                        is_bright  = "Sáng" if data.get('is_bright') else "Tối"
+                        pump       = data.get('pump', 'OFF')
+
+                        print(f"   [OK] [{DEVICE_KEY}] → "
+                              f"T={temp:.1f}°C | H={hum:.1f}% | "
+                              f"Đất={soil}% ({is_wet}) | Mưa={rain}% ({is_raining}) | "
+                              f"Ánh sáng={is_bright} | Bơm={pump}")
+
+                        client.publish(TOPIC_DATA, json.dumps(data))
+
                     except json.JSONDecodeError:
-                        print(f"   [ERROR] JSON lỗi: {line}")
-                    except requests.exceptions.RequestException as e:
-                        print(f"   [ERROR] Không kết nối được Node.js: {e}")
-                        
-            time.sleep(0.05)  # CPU nhẹ
+                        pass
+            time.sleep(0.01)
         except Exception as e:
-            print(f"Lỗi đọc Bluetooth: {e}")
+            print(f"Lỗi đọc Serial: {e}")
             time.sleep(1)
 
-# =============================================
-# 4. CHẠY CẢ 2 CHỨC NĂNG CÙNG LÚC
-# =============================================
+# ==================== KHỞI ĐỘNG ====================
 if __name__ == "__main__":
-    # Thread 1: Đọc dữ liệu từ ESP32
-    reader_thread = threading.Thread(target=bluetooth_reader, daemon=True)
-    reader_thread.start()
+    print("\n" + "="*70)
+    print("        SMART GARDEN GATEWAY – PHIÊN BẢN THẦN THÁNH 2025")
+    print("="*70)
+    print(f"   Node          : {DEVICE_KEY}")
+    print(f"   Bluetooth     : {COM_PORT}")
+    print(f"   MQTT Broker   : {MQTT_BROKER}:{MQTT_PORT}")
+    print(f"   Topic Data    : {TOPIC_DATA}")
+    print(f"   Topic Lệnh    : {TOPIC_CMD}")
+    print("="*70 + "\n")
 
-    # Thread 2: FastAPI server nhận lệnh từ Web
-    print("\nGateway Control Server đang chạy tại: http://127.0.0.1:8000")
-    print("   → Dùng để nhận lệnh BẬT/TẮT bơm từ Node.js")
-    print("   → Không cần mở terminal thứ 2!\n")
-
-    # Chạy FastAPI trên cổng 8000
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    threading.Thread(target=bluetooth_reader, daemon=True).start()
+    try:
+        while True: time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nDừng gateway. Tạm biệt!")
+        ser.close()

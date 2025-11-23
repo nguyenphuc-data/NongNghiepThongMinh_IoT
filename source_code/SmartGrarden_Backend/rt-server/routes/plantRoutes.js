@@ -28,6 +28,18 @@ router.get('/types', async (req, res) => {
     }
 });
 
+router.get('/types/:id', async (req, res) => {
+  try {
+    const type = await PlantType.findById(req.params.id);
+    if (!type) return res.status(404).json({ message: 'Không tìm thấy loại cây' });
+    console.log(`[API/TYPE] Fetched plant type: ${type.name}`);
+    res.json(type);
+  } catch (err) {
+    console.error('[API/TYPE] ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // [GET] /api/plants - Lấy danh sách các cây cụ thể (Đã gieo trồng)
 router.get('/', async (req, res) => {
     try {
