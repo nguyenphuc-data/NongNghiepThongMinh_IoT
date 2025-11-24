@@ -111,46 +111,49 @@ function App() {
         setIsModalOpen(false);
     };
 
-const selectActivePlantInApp = useCallback(async (plant) => {
+const selectActivePlantInApp = useCallback((plant) => {
+  console.log('=====================================');
+  console.log('SELECT PLANT ĐƯỢC GỌI!');
+  console.log('→ plant nhận được:', plant);
+  console.log('→ plant._id:', plant?._id);
+  console.log('→ plant.name:', plant?.name);
+  console.log('→ plant.plant_type_id (có phải object?):', plant?.plant_type_id);
+  
+  if (plant?.plant_type_id) {
+    console.log('LOẠI CÂY ĐÃ CÓ SẴN, SIÊU ĐẸP!');
+    console.log('   • Tên loại cây:', plant.plant_type_id.name);
+    console.log('   • Thresholds mẫu:', plant.plant_type_id.thresholds);
+    console.log('   • Warnings mẫu:', plant.plant_type_id.warnings);
+    console.log('   • Mô tả:', plant.plant_type_id.description);
+  } else {
+    console.warn('KHÔNG CÓ plant_type_id – có thể backend chưa populate!');
+  }
+  console.log('=====================================');
+
   setActivePlant(plant);
   setIsModalOpen(false);
-  setActivePlantType(null); // reset
-
-  const typeId = plant.plant_type_id?._id?.toString();
-
-  if (typeId) {
-    try {
-      const res = await axios.get(`http://localhost:3000/api/plants/types/${typeId}`);
-      setActivePlantType(res.data);
-      console.log("Đã tải loại cây:", res.data);
-    } catch (err) {
-      console.error("Lỗi lấy loại cây:", err.response?.data || err.message);
-      setActivePlantType(null);
-    }
-  } else {
-    console.warn("Không có plant_type_id hoặc _id để gọi API");
-    setActivePlantType(null);
-  }
+  setActivePlantType(plant?.plant_type_id || null);
 }, []);
 
     const renderPage = () => {
-        const componentProps = {
-            activePlant,
-            selectActivePlant: selectActivePlantInApp,
-            latestData,        // ← truyền xuống
-            status,            // ← truyền xuống
-            historyData        // ← truyền xuống (nếu History cần)
-        };
+  const componentProps = {
+    activePlant,
+    activePlantType,           // TRUYỀN TYPE ĐÃ CÓ SẴN
+    selectActivePlant: selectActivePlantInApp,
+    latestData,
+    status,
+    historyData
+  };
 
-        switch (currentPage) {
-            case 'dashboard':
-                return <Dashboard {...componentProps} />;
-            case 'history':
-                return <History activePlant={activePlant} historyData={historyData} />;
-            default:
-                return <Dashboard {...componentProps} />;
-        }
-    };
+  switch (currentPage) {
+    case 'dashboard':
+      return <Dashboard {...componentProps} />;
+    case 'history':
+      return <History activePlant={activePlant} historyData={historyData} />;
+    default:
+      return <Dashboard {...componentProps} />;
+  }
+};
 
     if (!isLoggedIn) {
         return <Login onLoginSuccess={handleLoginSuccess} />;

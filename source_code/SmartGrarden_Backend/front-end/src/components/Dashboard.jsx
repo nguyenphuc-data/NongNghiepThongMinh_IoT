@@ -1,8 +1,8 @@
-// src/components/Dashboard.jsx
+// src/components/Dashboard.jsx – PHIÊN BẢN ĐỈNH CAO NHẤT 2025
 import React, { useState } from 'react';
 import DataCard from './DataCard';
 
-const Dashboard = ({ latestData, status, activePlant }) => {
+const Dashboard = ({ latestData, status, activePlant, activePlantType }) => {
   const {
     temp,
     hum,
@@ -12,10 +12,12 @@ const Dashboard = ({ latestData, status, activePlant }) => {
     is_bright,
   } = latestData || {};
 
-  // Ánh sáng: chỉ "Sáng" hoặc "Tối"
+  // LẤY NGƯỠNG TỪ CÂY (ưu tiên thresholds cá nhân, nếu không có thì dùng của loại cây)
+  const t = activePlant?.thresholds || activePlantType?.thresholds || {};
+  const w = activePlant?.warnings || activePlantType?.warnings || {};
+
   const lightStatus = is_bright === true ? "Sáng" : is_bright === false ? "Tối" : "N/A";
 
-  // Format tất cả số về 1 chữ số thập phân
   const format = (val) => (val != null ? Number(val).toFixed(1) : "0.0");
 
   const [isPumpBusy, setIsPumpBusy] = useState(false);
@@ -44,6 +46,23 @@ const Dashboard = ({ latestData, status, activePlant }) => {
     return activePlant?._id ? 'Kết nối & Hoạt động' : 'Đã kết nối (chưa chọn cây)';
   };
 
+  // TẠO DANH SÁCH CẢNH BÁO
+  const warningsList = [];
+  if (temp < t.temp_min) warningsList.push(`Nhiệt độ quá thấp (${temp}°C < ${t.temp_min}°C)`);
+  if (temp > t.temp_max) warningsList.push(`Nhiệt độ quá cao (${temp}°C > ${t.temp_max}°C)`);
+  if (hum < t.air_humidity_min) warningsList.push(`Độ ẩm không khí thấp (${hum}% < ${t.air_humidity_min}%)`);
+  if (hum > t.air_humidity_max) warningsList.push(`Độ ẩm không khí cao (${hum}% > ${t.air_humidity_max}%)`);
+  if (soil_percent < t.soil_moisture_min) warningsList.push(`Đất quá khô (${soil_percent}% < ${t.soil_moisture_min}%)`);
+  if (soil_percent > t.soil_moisture_max) warningsList.push(`Đất quá ẩm (${soil_percent}% > ${t.soil_moisture_max}%)`);
+
+  // Thêm cảnh báo tùy chỉnh nếu có
+  if (temp < t.temp_min && w.low_temp) warningsList.push(w.low_temp);
+  if (temp > t.temp_max && w.high_temp) warningsList.push(w.high_temp);
+  if (hum < t.air_humidity_min && w.low_humidity) warningsList.push(w.low_humidity);
+  if (hum > t.air_humidity_max && w.high_humidity) warningsList.push(w.high_humidity);
+  if (soil_percent < t.soil_moisture_min && w.low_soil) warningsList.push(w.low_soil);
+  if (soil_percent > t.soil_moisture_max && w.high_soil) warningsList.push(w.high_soil);
+
   if (!activePlant) {
     return (
       <div style={{ textAlign: "center", padding: "120px 20px", background: "#f8f9fa", borderRadius: 24, marginTop: 40, border: "4px dashed #ccc" }}>
@@ -61,22 +80,83 @@ const Dashboard = ({ latestData, status, activePlant }) => {
         Trạng thái: <strong style={{ color: '#0b0' }}>{displayStatus()}</strong>
       </p>
 
-      {/* CÁC THẺ TÁCH RỜI RÕ RÀNG, ĐẸP NHƯ ẢNH */}
+      {/* CẢNH BÁO – Ô RIÊNG SIÊU ĐẸP */}
+      {warningsList.length > 0 && (
+        <div style={{
+          background: "#ffebee",
+          border: "3px solid #e53935",
+          borderRadius: 20,
+          padding: "20px 24px",
+          marginBottom: 32,
+          boxShadow: "0 8px 25px rgba(229,57,53,0.2)"
+        }}>
+          <h3 style={{ margin: "0 0 16px", color: "#c62828", fontWeight: "bold", fontSize: "1.4em" }}>
+            CẢNH BÁO
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {warningsList.map((msg, i) => (
+              <div key={i} style={{
+                background: "white",
+                padding: "12px 16px",
+                borderRadius: 16,
+                borderLeft: "5px solid #e53935",
+                fontSize: "1em",
+                color: "#b71c1c",
+                fontWeight: "bold"
+              }}>
+                {msg}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CÁC THẺ DỮ LIỆU – CÓ NGƯỠNG MIN/MAX NHỎ NHẮN BÊN DƯỚI */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-        gap: "28px",           // Tăng gap lên 28px → tách rõ ràng hơn
+        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+        gap: "28px",
         marginBottom: "48px"
       }}>
-        <DataCard title="Nhiệt độ"      value={format(temp)}         unit="°C" />
-        <DataCard title="Độ ẩm KK"      value={format(hum)}          unit="%" />
-        <DataCard title="Độ ẩm Đất"     value={format(soil_percent)} unit="%" />
-        <DataCard title="Ánh sáng"      value={lightStatus}          unit=""   color={is_bright ? "#e67e22" : "#2c3e50"} />
-        <DataCard title="Mưa"           value={format(rain_percent)} unit="%"  color={rain_percent > 50 ? "#3498db" : "#95a5a6"} />
-        <DataCard title="Bơm"           value={pump === "ON" ? "BẬT" : "TẮT"} unit="" status={pump} />
+        <DataCard
+          title="Nhiệt độ"
+          value={format(temp)}
+          unit="°C"
+          range={`(${t.temp_min || '?'} – ${t.temp_max || '?'}°C)`}
+        />
+        <DataCard
+          title="Độ ẩm KK"
+          value={format(hum)}
+          unit="%"
+          range={`(${t.air_humidity_min || '?'} – ${t.air_humidity_max || '?'}%)`}
+        />
+        <DataCard
+          title="Độ ẩm Đất"
+          value={format(soil_percent)}
+          unit="%"
+          range={`(${t.soil_moisture_min || '?'} – ${t.soil_moisture_max || '?'}%)`}
+        />
+        <DataCard
+          title="Ánh sáng"
+          value={lightStatus}
+          unit=""
+          color={is_bright ? "#e67e22" : "#2c3e50"}
+        />
+        <DataCard
+          title="Mưa"
+          value={format(rain_percent)}
+          unit="%"
+          color={rain_percent > 50 ? "#3498db" : "#95a5a6"}
+        />
+        <DataCard
+          title="Bơm"
+          value={pump === "ON" ? "BẬT" : "TẮT"}
+          unit=""
+          status={pump}
+        />
       </div>
 
-      {/* ĐIỀU KHIỂN TƯỚI – ĐẸP LUNG LINH */}
+      {/* ĐIỀU KHIỂN TƯỚI */}
       <div style={{
         textAlign: "center",
         padding: "40px 28px",

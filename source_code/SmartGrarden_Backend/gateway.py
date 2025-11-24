@@ -13,8 +13,8 @@ DEVICE_KEY = 'esp32_vuonrau'
 MQTT_BROKER = "127.0.0.1"
 MQTT_PORT   = 1883
 
-TOPIC_DATA = f"smartgarden/{DEVICE_KEY}/data"
-TOPIC_CMD  = f"smartgarden/{DEVICE_KEY}/cmd"
+TOPIC_DATA = f"smartgarden/{DEVICE_KEY}/data"  # pub
+TOPIC_CMD  = f"smartgarden/{DEVICE_KEY}/cmd"  # sub
 
 # ==================== KẾT NỐI BLUETOOTH ====================
 try:

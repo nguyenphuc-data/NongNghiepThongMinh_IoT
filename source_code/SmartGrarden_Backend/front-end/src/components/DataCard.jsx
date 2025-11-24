@@ -1,37 +1,38 @@
 // src/components/DataCard.jsx
-import React from 'react';
-
-const THEME = {
-    PRIMARY_COLOR: '#00593F', // Xanh đậm
-    SECONDARY_COLOR: '#F3F9F8', // Nền sáng
-};
-
-const DataCard = ({ title, value, unit, status }) => {
-    // Logic tạo màu sắc cho trạng thái bơm (Pump)
-    let statusColor = status === 'ON' ? '#FF5733' : '#4CAF50';
-    
-    return (
-        <div style={{
-            flex: '1 1 200px', // Đảm bảo responsive
-            margin: '10px',
-            padding: '20px',
-            backgroundColor: 'white',
-            borderRadius: '10px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-            transition: 'transform 0.2s',
-            borderLeft: `5px solid ${THEME.PRIMARY_COLOR}`
+const DataCard = ({ title, value, unit, range, color, status }) => {
+  return (
+    <div style={{
+      background: "white",
+      borderRadius: 20,
+      padding: "20px 16px",
+      textAlign: "center",
+      boxShadow: "0 8px 25px rgba(0,0,0,0.1)",
+      border: "2px solid #e0e0e0",
+      transition: "all 0.3s"
+    }}>
+      <p style={{ margin: "0 0 8px", fontSize: "0.95em", color: "#555", fontWeight: "bold" }}>
+        {title}
+      </p>
+      <p style={{
+        margin: 0,
+        fontSize: "2.4em",
+        fontWeight: "900",
+        color: color || "#00593F"
+      }}>
+        {value}<span style={{ fontSize: "0.5em", marginLeft: 4 }}>{unit}</span>
+      </p>
+      {range && (
+        <p style={{
+          margin: "8px 0 0",
+          fontSize: "0.78em",
+          color: "#888",
+          fontWeight: "600"
         }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.1em', color: '#555' }}>{title}</h3>
-            <div style={{ 
-                fontSize: '2.5em', 
-                fontWeight: 'bold', 
-                color: status ? statusColor : THEME.PRIMARY_COLOR 
-            }}>
-                {value}
-                <span style={{ fontSize: '0.5em', fontWeight: 'normal', color: '#888', marginLeft: '5px' }}>{unit}</span>
-            </div>
-        </div>
-    );
+          {range}
+        </p>
+      )}
+    </div>
+  );
 };
 
 export default DataCard;
