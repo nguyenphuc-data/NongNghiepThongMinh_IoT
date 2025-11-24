@@ -39,37 +39,60 @@ router.post('/register', async (req, res) => {
 
 // === 2. Đăng nhập (Login) ===
 router.post('/login', async (req, res) => {
-    const { username, password } = req.body;
-    console.log('\n=======================================');
-    console.log(`[DEBUG LOG] Dữ liệu nhận: Username: ${username}, Password: ${password}`);
+    let { username, password } = req.body;
+
+    // SIÊU QUAN TRỌNG: Loại bỏ khoảng trắng thừa
+    if (username) username = username.trim();
+    if (password) password = password.trim();
+
+    console.log('=======================================');
+    console.log('Dữ liệu nhận được:', { username, password });
+    console.log('Độ dài password:', password?.length);
+
     try {
-        // 1. Kiểm tra người dùng
-        const user = await User.findOne({ username });
+        // Tìm user (không phân biệt hoa thường - khuyến khích)
+        const user = await User.findOne({ 
+            username: { $regex: `^${username}$`, $options: 'i' } 
+        });
+
         if (!user) {
-            return res.status(400).json({ message: 'Thông tin đăng nhập không hợp lệ.' });
+            console.log('Không tìm thấy user:', username);
+            return res.status(400).json({ message: 'Sai tên đăng nhập hoặc mật khẩu' });
         }
 
-        let isMatch = false; 
-        isMatch = (password === user.password);
-        
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Thông tin đăng nhập không hợp lệ.' });
+        console.log('User tìm thấy:', user.username);
+        console.log('Password trong DB:', user.password);
+        console.log('Password người dùng nhập:', password);
+
+        // So sánh chính xác từng ký tự (plain text)
+        if (password !== user.password) {
+            console.log('Mật khẩu KHÔNG khớp!');
+            return res.status(400).json({ message: 'Sai tên đăng nhập hoặc mật khẩu' });
         }
 
-        const payload = { userId: user.id, username: user.username };
-        
-        jwt.sign(
+        // Thành công → tạo token
+        const payload = { userId: user._id, username: user.username };
+
+        const token = jwt.sign(
             payload,
-            JWT_SECRET,
-            { expiresIn: '1h' },
-            (err, token) => {
-                if (err) throw err;
-                res.json({ token, username: user.username });
-            }
+            process.env.JWT_SECRET || "your_very_secret_key_here", // ĐẢM BẢO có giá trị
+            { expiresIn: '7d' }
         );
+
+        console.log('Đăng nhập THÀNH CÔNG:', user.username);
+
+        res.json({
+            success: true,
+            token,
+            user: {
+                id: user._id,
+                username: user.username
+            }
+        });
+
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server error');
+        console.error('Lỗi server:', err.message);
+        res.status(500).json({ message: 'Lỗi server' });
     }
 });
 
