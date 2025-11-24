@@ -1,0 +1,108 @@
+/* src/App.css (Final Green & White/Silver Theme) */
+
+/* --- Thiết lập màu sắc và Font cơ bản --- */
+:root {
+  --primary-color: #00593F; /* Xanh Lá Đậm - Màu Chính */
+  --secondary-color: #00885E; /* Xanh lá nhạt hơn cho hover/điểm nhấn */
+  --header-bg: #FFFFFF; /* Nền Header Trắng */
+  --main-content-bg: #FFFFFF; /* Nền Dashboard/History là TRẮNG */
+  --sidebar-bg: #F9FBFA; /* Nền Sidebar MÀU BẠC YÊU CẦU */
+  --border-color: #CCCCCC; /* Màu Bạc cho đường kẻ */
+  --text-dark: #222222; /* Chữ đen thường */
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--main-content-bg); /* Nền toàn bộ là màu trắng */
+  color: var(--text-dark);
+}
+
+/* --- Layout Chính --- */
+.layout-container {
+  display: flex;
+  min-height: 100vh;
+  /* Đảm bảo Main Content nền trắng phủ lên Sidebar Background nếu có lỗi */
+}
+
+/* --- Header (Top Nav) --- */
+.header {
+  height: 60px;
+  background-color: var(--header-bg);
+  color: var(--text-dark);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border-color); 
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+}
+
+.app-title {
+  font-size: 1.5em;
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+.logout-button {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.logout-button:hover {
+  background-color: var(--secondary-color);
+}
+
+/* --- Sidebar (Left Nav) --- */
+.sidebar {
+  width: 250px;
+  background-color: var(--sidebar-bg); /* F9FBFA */
+  padding-top: 60px; 
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 9;
+  /* THÊM BORDER BÊN PHẢI */
+  border-right: 1px solid var(--border-color); 
+}
+
+.sidebar-nav a {
+  display: block;
+  padding: 15px 20px;
+  text-decoration: none;
+  color: var(--text-dark); /* Màu chữ không chọn là đen */
+  font-weight: 500;
+  border-left: 5px solid transparent;
+  transition: background-color 0.2s, color 0.2s, border-left-color 0.2s;
+}
+
+.sidebar-nav a:hover {
+  background-color: #E6E6E6; /* Hover màu xám nhạt */
+}
+
+.sidebar-nav a.active {
+  background-color: #E3FCF7; /* Nền đang chọn */
+  color: var(--primary-color); /* Chữ đang chọn là 00593F */
+  font-weight: 700; /* Làm chữ đậm hơn khi chọn */
+  border-left-color: var(--primary-color); 
+}
+
+/* --- Main Content Area --- */
+.main-content {
+  margin-left: 250px; 
+  padding: 80px 20px 20px 20px; 
+  flex-grow: 1;
+  width: 100%;
+  background-color: var(--main-content-bg); /* Đảm bảo nền là màu TRẮNG */
+}

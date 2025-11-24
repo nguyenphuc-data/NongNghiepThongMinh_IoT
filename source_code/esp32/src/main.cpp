@@ -1,108 +1,149 @@
+// main.ino – BẢN CUỐI CÙNG + LOG FIRMWARE THẬT 100% (2025)
 #include <Arduino.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
+#include <BluetoothSerial.h>
 #include <ArduinoJson.h>
+#include <DHT.h>
+#include <esp_ota_ops.h>      // ← THÊM DÒNG NÀY
+#include <esp_app_format.h>   // ← THÊM DÒNG NÀY
 
-// === SENSOR INCLUDES ===
-#include "sensor/dht22.h"
-#include "sensor/rain.h"
-#include "sensor/soil.h"
-#include "sensor/light.h"
+#define DHT_PIN     21
+#define DHT_TYPE    DHT22
+#define LIGHT_DO    18
+#define RAIN_AO     34
+#define RAIN_DO     35
+#define SOIL_AO     32
+#define SOIL_DO     33
+#define PUMP_PIN    25
 
-// === CẤU HÌNH ===
-const char* ssid = "ONG HUNG_Plus";
-const char* password = "onghung135";
-const char* mqtt_server = "192.168.1.113";  // IP MÁY TÍNH
-const char* mqtt_topic = "esp32/sensors";
+DHT dht(DHT_PIN, DHT_TYPE);
+BluetoothSerial SerialBT;
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+// === BIẾN TOÀN CỤC ===
+char jsonBuffer[400];
+String btCmd = "";
+bool pumpState = false;
+bool lastPumpState = false;
+unsigned long lastSend = 0;
+unsigned long lastCommandTime = 0;
 
-// === KHAI BÁO HÀM (CÓ THAM SỐ) ===
-void setupWiFi();
-void reconnectMQTT();
-void publishData(float temp, float hum, int rainP, bool raining, int soilP, bool soilWet, bool bright); 
+float currentTemp = -1;
+float currentHum = -1;
+unsigned long lastDHTRead = 0;
+#define FIRMWARE_VERSION "v1.0.0 23112025"    
+// === HÀM IN LOG FIRMWARE THẬT – SIÊU ĐẸP ===
+void printRealFirmwareInfo() {
+  const esp_app_desc_t *app = esp_ota_get_app_description();
 
+  Serial.println("\n╔══════════════════════════════════════════════════╗");
+  Serial.println("║             SMART GARDEN ESP32 - 2025            ║");
+  Serial.println("╠══════════════════════════════════════════════════╣");
+  Serial.printf("║ Project Name    : %s\n", app->project_name);
+  Serial.printf("║ Version      : %s\n", FIRMWARE_VERSION);
+  Serial.printf("║ Firmware Version: %s\n", app->version);        // ← THẬT 100%
+  Serial.printf("║ Compile Time    : %s %s\n", app->date, app->time);
+  Serial.printf("║ IDF Version     : %s\n", app->idf_ver);
+  Serial.printf("║ Chip            : %s Rev %d\n", 
+                ESP.getChipModel(), ESP.getChipRevision());
+  Serial.printf("║ Flash Size      : %d MB\n", ESP.getFlashChipSize() / 1024 / 1024);
+  
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  Serial.printf("║ Running Partition: %s (0x%x)\n", running->label, running->address);
+  Serial.println("╚══════════════════════════════════════════════════╝\n");
+}
+
+// === HÀM TASK ĐỌC DHT ===
+void dhtTask(void *pvParameters) {
+  for (;;) {
+    if (millis() - lastDHTRead >= 3000) {
+      float t = dht.readTemperature();
+      float h = dht.readHumidity();
+      if (!isnan(t)) currentTemp = round(t * 10) / 10.0;
+      if (!isnan(h)) currentHum = round(h * 10) / 10.0;
+      lastDHTRead = millis();
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
+}
+
+// === SETUP ===
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("=== ESP32 → MQTT → MongoDB (PlatformIO) ===");
+  SerialBT.begin("ESP32_VUON_RAU");
 
+  // ← IN FIRMWARE THẬT NGAY TỪ ĐẦU!
+  printRealFirmwareInfo();
+
+  Serial.println("=== ESP32 VUON RAU - BẢN HOÀN HẢO NHẤT 2025 ===");
+
+  analogSetAttenuation(ADC_11db);
   dht.begin();
-  setupRain();
-  setupSoil();
-  setupLight();
+  pinMode(LIGHT_DO, INPUT_PULLUP);
+  pinMode(RAIN_DO, INPUT);
+  pinMode(SOIL_DO, INPUT);
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, HIGH);
 
-  setupWiFi();
-  client.setServer(mqtt_server, 1883);
+  xTaskCreatePinnedToCore(
+    dhtTask, "DHT_Task", 4096, NULL, 1, NULL, 0
+  );
 }
 
+// === HÀM GỬI DỮ LIỆU ===
+void sendData() {
+  StaticJsonDocument<400> doc;
+  doc["temp"] = currentTemp;
+  doc["hum"]  = currentHum;
+  doc["rain_percent"] = constrain(map(analogRead(RAIN_AO), 4095, 1351, 0, 100), 0, 100);
+  doc["is_raining"]   = digitalRead(RAIN_DO) == LOW;
+  doc["soil_percent"] = constrain(map(analogRead(SOIL_AO), 4095, 2600, 0, 100), 0, 100);
+  doc["is_soil_wet"]  = digitalRead(SOIL_DO) == LOW;
+  doc["is_bright"]    = digitalRead(LIGHT_DO) == LOW;
+  doc["pump"]         = pumpState ? "ON" : "OFF";
+  doc["device"]       = "esp32_vuonrau";
+
+  int len = serializeJson(doc, jsonBuffer, sizeof(jsonBuffer) - 2);
+  jsonBuffer[len] = '\n';
+  jsonBuffer[len + 1] = '\0';
+
+  SerialBT.write((uint8_t*)jsonBuffer, len + 1);
+  Serial.printf("Gửi BT: %s", jsonBuffer);
+}
+
+// === HÀM ĐIỀU KHIỂN BƠM ===
+void controlPump(bool on) {
+  digitalWrite(PUMP_PIN, on ? LOW : HIGH);
+  pumpState = on;
+  Serial.println(on ? "BƠM: BẬT" : "BƠM: TẮT");
+}
+
+// === LOOP CHÍNH ===
 void loop() {
-  if (!client.connected()) reconnectMQTT();
-  client.loop();
-
-  float h, t;
-  if (!readDHT22(h, t)) { h = t = -999; }
-
-  int rainP = readRainPercent();
-  bool raining = isRaining();
-  int soilP = readSoilPercent();
-  bool soilWet = isSoilWet();
-  bool bright = isBright();
-
-  printDHT22(h, t);
-  printRain(rainP, raining);
-  printSoil(soilP, soilWet);
-  printLight(bright);
-
-  // GỌI HÀM ĐÚNG 7 THAM SỐ
-  publishData(t, h, rainP, raining, soilP, soilWet, bright);
-
-  Serial.println("---");
-  delay(5000);
-}
-
-void setupWiFi() {
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi OK: " + WiFi.localIP().toString());
-}
-
-void reconnectMQTT() {
-  while (!client.connected()) {
-    String clientId = "ESP32-" + String(random(0xffff), HEX);
-    if (client.connect(clientId.c_str())) {
-      Serial.println("MQTT Connected");
-    } else {
-      Serial.print("MQTT failed, rc="); Serial.println(client.state());
-      delay(5000);
+  while (SerialBT.available()) {
+    char c = SerialBT.read();
+    if (c == '\n' || c == '\r') {
+      if (btCmd.length() > 0) {
+        btCmd.trim();
+        if (btCmd == "PUMP:ON" && millis() - lastCommandTime > 800) {
+          controlPump(true);
+          lastCommandTime = millis();
+        }
+        if (btCmd == "PUMP:OFF" && millis() - lastCommandTime > 800) {
+          controlPump(false);
+          lastCommandTime = millis();
+        }
+        btCmd = "";
+      }
+    } else if (c >= ' ' && c <= '~') {
+      btCmd += c;
     }
+    yield();
   }
-}
 
-// === ĐỊNH NGHĨA HÀM (CÓ 7 THAM SỐ) ===
-void publishData(float temp, float hum, int rainP, bool raining, int soilP, bool soilWet, bool bright) {
-  DynamicJsonDocument doc(256);
-  doc["temp"] = temp;
-  doc["hum"] = hum;
-  doc["rain_percent"] = rainP;
-  doc["is_raining"] = raining;
-  doc["soil_percent"] = soilP;
-  doc["is_soil_wet"] = soilWet;
-  doc["is_bright"] = bright;
-  doc["device"] = "esp32_garden";
-  doc["timestamp"] = millis();
-
-  String payload;
-  serializeJson(doc, payload);
-
-  if (client.publish(mqtt_topic, payload.c_str())) {
-    Serial.println("Published: " + payload);
-  } else {
-    Serial.println("Publish failed!");
+  if (pumpState != lastPumpState || millis() - lastSend >= 5000) {
+    sendData();
+    lastPumpState = pumpState;
+    lastSend = millis();
   }
+
+  yield();
 }
