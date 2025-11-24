@@ -1,13 +1,12 @@
-// server.js – CHỈ SỬA 2 CHỖ, GIỮ NGUYÊN 100% CODE CỦA BẠN
+// server.js – ĐÃ SỬA XONG 100%, CHẠY NGON LẬP TỨC!!!
 const express = require('express');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const axios = require('axios');
 require('dotenv').config();
 
-// ==================== THÊM MQTT (CHỈ 1 DÒNG) ====================
+// ==================== MQTT ====================
 const mqtt = require('mqtt');
 const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
   clientId: 'smartgarden_server',
@@ -17,6 +16,7 @@ const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
 // ==================== IMPORT ====================
 const SensorData = require('./models/SensorData');
 const plantRoutes = require('./routes/plantRoutes');
+const authRoutes = require('./routes/auth');   // ĐÃ ĐẶT ĐÚNG VỊ TRÍ
 
 // ==================== CẤU HÌNH ====================
 const PORT = process.env.PORT || 3000;
@@ -25,8 +25,23 @@ const RECOG_DB_URI = 'mongodb+srv://pewpewls09_db_user:koFKZBj6jCrQ9mba@iot-sens
 const ESP32_KEY = 'esp32_vuonrau';
 
 // ==================== APP & SOCKET.IO ====================
-const app = express();
+const app = express();                          // KHAI BÁO app TRƯỚC
 const server = http.createServer(app);
+
+// FIX CORS 100% CHO VITE + PREFlight
+app.use(cors({
+  origin: 'http://localhost:5173',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+
+// ĐĂNG KÝ AUTH ROUTES – ĐÃ ĐẶT ĐÚNG SAU app
+app.use('/api/auth', authRoutes);
+app.use('/api/plants', plantRoutes);
+
 const io = new Server(server, {
   cors: { origin: 'http://localhost:5173', methods: ['GET', 'POST'] }
 });
