@@ -1,44 +1,61 @@
+// models/PlantType.js
 const mongoose = require('mongoose');
 
 const PlantTypeSchema = new mongoose.Schema({
-    name: { 
-        type: String, 
-        required: true, 
-        unique: true, 
-        trim: true 
+    name: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true
+    },
+    description: {
+        type: String,
+        default: ''
+    },
+    image_url: {
+        type: String,
+        default: ''
+    },
+    growth_time_days: {
+        type: Number,
+        default: 60
+    },
+    light: {
+        type: String,
+        default: 'Ánh sáng mạnh'
+    },
+    watering_tips: {
+        type: String,
+        default: 'Tưới đều đặn, giữ ẩm vừa phải'
     },
 
-    // THRESHOLDS – ĐÃ THÊM AIR HUMIDITY + BỎ auto_water, CHỈ GIỮ duration
-    thresholds: {
+    // Ngưỡng mặc định cho loại cây này
+    defaultThresholds: {
         temp_min: { type: Number, default: 18 },
-        temp_max: { type: Number, default: 30 },
-
-        air_humidity_min: { type: Number, default: 40 },   // thêm cảnh báo độ ẩm không khí
-        air_humidity_max: { type: Number, default: 85 },   // thêm cảnh báo độ ẩm không khí
-
+        temp_max: { type: Number, default: 32 },
+        air_humidity_min: { type: Number, default: 40 },
+        air_humidity_max: { type: Number, default: 85 },
         soil_moisture_min: { type: Number, default: 35 },
         soil_moisture_max: { type: Number, default: 70 },
-
-        auto_water_duration: { type: Number, default: 8 }  // còn lại: mỗi lần tưới tự động bao nhiêu giây (8s ≈ 1 lít)
-        // → BỎ auto_water (bật/tắt tự động) → bạn sẽ điều khiển thủ công ở frontend hoặc garden settings
+        auto_water_duration: { type: Number, default: 8 } // giây
     },
 
-    // CẢNH BÁO ĐẸP – ĐÃ CÓ CẢ AIR HUMIDITY
-    warnings: {
-        low_temp:     { type: String, default: "Nhiệt độ quá thấp, cây phát triển chậm." },
-        high_temp:    { type: String, default: "Nhiệt độ quá cao, dễ cháy lá!" },
-        low_humidity: { type: String, default: "Độ ẩm không khí thấp, cây dễ mất nước." },
-        high_humidity:{ type: String, default: "Độ ẩm không khí quá cao, dễ bị nấm mốc." },
-        low_soil:     { type: String, default: "Đất quá khô! Cần tưới ngay để tránh cây héo." },
-        high_soil:    { type: String, default: "Đất quá ẩm, dễ thối rễ. Hãy ngừng tưới tạm thời." }
+    // Cảnh báo mặc định
+    defaultWarnings: {
+        low_temp: { type: String, default: 'Nhiệt độ quá thấp, cây phát triển chậm.' },
+        high_temp: { type: String, default: 'Nhiệt độ quá cao, dễ cháy lá!' },
+        low_humidity: { type: String, default: 'Độ ẩm không khí thấp, cây bị héo.' },
+        high_humidity: { type: String, default: 'Độ ẩm quá cao, dễ bị nấm mốc.' },
+        low_soil: { type: String, default: 'Đất quá khô! Cần tưới ngay để tránh héo.' },
+        high_soil: { type: String, default: 'Đất quá ướt, dễ thối rễ. Hãy giảm tưới.' }
     },
 
-    description:   { type: String, default: 'Không có mô tả' },
-    watering_tips: { type: String, default: 'Tưới đều đặn vào sáng sớm hoặc chiều mát.' },
-    light:         { type: String, default: 'Ánh sáng toàn phần' },
-    growth_time_days: { type: Number, default: 45 },
-    image_url:     { type: String }
-
-}, { timestamps: true });
+    isActive: {
+        type: Boolean,
+        default: true
+    }
+}, {
+    timestamps: true
+});
 
 module.exports = mongoose.model('PlantType', PlantTypeSchema);
