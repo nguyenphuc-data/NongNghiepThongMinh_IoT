@@ -1,124 +1,109 @@
-// routes/plantRoutes.js
+// routes/plantRoutes.js – ĐÃ SỬA HOÀN CHỈNH, CHẤP NHẬN plant_type_id = "ca_chua", zoneId = "zone_01"
 const express = require('express');
 const router = express.Router();
-const PlantType = require('../models/PlantType'); // Giả định đường dẫn models/PlantType.js
-const Plant = require('../models/Plant');         // Giả định đường dẫn models/Plant.js
+const mongoose = require('mongoose');
+const Plant = require('../models/Plant');
+const PlantType = require('../models/PlantType');
 
+// Middleware (giữ nguyên)
+const requireAuth = (req, res, next) => {
+  if (!req.session.user) return res.status(401).json({ message: 'Chưa đăng nhập' });
+  req.user = req.session.user;
+  next();
+};
 
+const requireAdmin = (req, res, next) => {
+  if (req.session.user?.role !== 'admin') {
+    return res.status(403).json({ message: 'Chỉ admin mới được thực hiện' });
+  }
+  next();
+};
+
+// GET: Lấy cây theo zone
 router.get('/', async (req, res) => {
-    try {
-        let query = Plant.find();
+  const { zoneId } = req.query;
+  if (!zoneId) return res.status(400).json({ message: 'Thiếu zoneId' });
 
-        // Luôn populate nếu không có query hoặc có yêu cầu populate
-        if (!req.query.populate || req.query.populate === 'plant_type_id') {
-            query = query.populate('plant_type_id', 'name thresholds warnings description watering_tips light growth_time_days image_url');
-        }
+  // Nếu zoneId là string (ví dụ: "zone_vuon_chinh") thì tìm ObjectId thật
+  let realZoneId = zoneId;
+  if (!mongoose.Types.ObjectId.isValid(zoneId)) {
+    const zone = await mongoose.connection.db.collection('zones').findOne({ zoneId: zoneId });
+    if (!zone) return res.status(400).json({ message: 'Khu vực không tồn tại' });
+    realZoneId = zone._id;
+  }
 
-        const plants = await query.lean(); // lean() cho tốc độ nhanh hơn
-        res.json(plants);
-    } catch (err) {
-        console.error('[API/PLANTS] Lỗi:', err.message);
-        res.status(500).json({ message: err.message });
-    }
+  const plants = await Plant.find({ zoneId: realZoneId })
+    .populate('plant_type_id', 'name image_url code thresholds warnings')
+    .lean();
+
+  res.json(plants);
 });
-// [GET] /api/plants/types - Lấy danh sách các loại cây
+
+// GET: Danh sách loại cây
 router.get('/types', async (req, res) => {
-    // ⭐ LOG 1: Bắt đầu xử lý request
-    console.log('[API/TYPES] Request received to fetch plant types.'); 
-
-    try {
-        const types = await PlantType.find();
-        
-        // ⭐ LOG 2: Kiểm tra số lượng bản ghi tìm thấy
-        console.log(`[API/TYPES] Found ${types.length} plant types.`);
-        
-        // ⭐ LOG 3: Log 5 bản ghi đầu tiên (để kiểm tra dữ liệu)
-        if (types.length > 0) {
-            console.log('[API/TYPES] Sample data:', types.slice(0, 5).map(t => ({ _id: t._id, name: t.name })));
-        }
-
-        res.json(types);
-    } catch (err) {
-        // ⭐ LOG 4: Bắt lỗi nếu truy vấn DB thất bại
-        console.error('[API/TYPES] ERROR during database query:', err.message);
-        res.status(500).json({ message: err.message });
-    }
+  const types = await PlantType.find().lean();
+  res.json(types);
 });
 
-router.get('/types/:id', async (req, res) => {
-  const id = req.params.id.trim();
-  
-  console.log('[API/TYPE] Đang tìm loại cây với ID:', id);
-
+// POST: Thêm cây mới – CHẤP NHẬN CẢ STRING VÀ OBJECTID
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // ĐƠN GIẢN – NHANH – CHUẨN – VÌ _id BÂY GIỜ ĐÃ LÀ ObjectId THẬT SỰ
-    const type = await PlantType.findById(id);
+    const { name, plantTypeId, zoneId, deviceId, datePlanted } = req.body;
 
-    if (!type) {
-      console.log('[API/TYPE] Không tìm thấy loại cây với ID:', id);
-      return res.status(404).json({ message: 'Không tìm thấy loại cây' });
+    if (!name || !plantTypeId || !zoneId) {
+      return res.status(400).json({ message: 'Thiếu thông tin bắt buộc' });
     }
 
-    console.log('[API/TYPE] TÌM THẤY →', type.name);
-    res.json(type);
+    const newPlant = new Plant({
+      name: name.trim(),
+      plantTypeId,
+      zoneId,
+      deviceId: deviceId || 'esp32_vuonrau',
+      datePlanted: datePlanted || new Date(),
+    });
 
+    const saved = await newPlant.save();
+    const populated = await Plant.findById(saved._id).populate('typeInfo', 'name image_url').lean();
+
+    res.status(201).json(populated);
   } catch (err) {
-    // Nếu ID không hợp lệ (không phải 24 ký tự hex), mongoose sẽ ném lỗi
-    if (err.name === 'CastError') {
-      console.log('[API/TYPE] ID không hợp lệ:', id);
-      return res.status(400).json({ message: 'ID loại cây không hợp lệ' });
-    }
-
-    console.error('[API/TYPE] Lỗi server:', err.message);
+    console.error('Lỗi thêm cây:', err);
     res.status(500).json({ message: 'Lỗi server' });
   }
 });
 
-// [GET] /api/plants - Lấy danh sách các cây cụ thể (Đã gieo trồng)
-router.get('/', async (req, res) => {
-    try {
-        // Sử dụng populate để lấy thông tin loại cây kèm theo
-        const plants = await Plant.find().populate('plant_type_id', 'name thresholds');
-        res.json(plants);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-});
+// === XÓA CÂY – CHỈ ADMIN ===
+router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const plantId = req.params.id;
 
-// [POST] /api/plants - Thêm cây mới
-router.post('/', async (req, res) => {
-    const { 
-        name, 
-        location, 
-        device_key, 
-        plant_type_id,
-        thresholds,
-        warnings
-    } = req.body;
-    
-    if (device_key !== 'esp32_vuonrau') {
-         return res.status(400).json({ message: 'Invalid device key for this setup.' });
+    // Kiểm tra ObjectId hợp lệ
+    if (!mongoose.Types.ObjectId.isValid(plantId)) {
+      return res.status(400).json({ message: 'ID cây không hợp lệ' });
     }
-    
-    const newPlant = new Plant({
-        name,
-        location,
-        device_key,
-        plant_type_id,
-        thresholds: thresholds || undefined,
-        warnings: warnings || undefined
+
+    const plant = await Plant.findById(plantId);
+    if (!plant) {
+      return res.status(404).json({ message: 'Không tìm thấy cây này' });
+    }
+
+    // XÓA THẬT (hoặc có thể dùng soft-delete: set status = 'deleted')
+    await Plant.findByIdAndDelete(plantId);
+
+    // Gợi ý: nếu bạn có lưu dữ liệu cảm biến theo plant_id thì cũng nên xóa luôn
+    // await SensorData.deleteMany({ plant_id: plantId });
+
+    console.log(`[XÓA CÂY] Admin ${req.user.username} đã xóa cây: ${plant.name} (${plantId})`);
+    res.json({ 
+      success: true, 
+      message: 'Đã xóa cây thành công!',
+      deletedPlant: plant 
     });
 
-    try {
-        const plant = await newPlant.save();
-        const populatedPlant = await Plant.findById(plant._id)
-            .populate('plant_type_id', 'name thresholds warnings description watering_tips light growth_time_days image_url');
-
-        res.status(201).json(populatedPlant); // ← chỉ trả về plant đã populate đầy đủ
-    } catch (err) {
-        console.error("Lỗi tạo cây:", err);
-        res.status(400).json({ message: err.message });
-    }
+  } catch (err) {
+    console.error('Lỗi xóa cây:', err);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
 });
 
 module.exports = router;
