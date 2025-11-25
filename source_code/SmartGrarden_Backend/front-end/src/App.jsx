@@ -1,68 +1,54 @@
-// src/App.jsx
+// src/App.jsx – ĐÃ ĐƯỢC CẬP NHẬT THEO YÊU CẦU: NÚT BACK NGAY CẠNH NÚT ĐỔI CÂY & GIỐNG HỆT
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import io from 'socket.io-client'; // ← thêm import này
+import io from 'socket.io-client';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import History from './components/History';
 import PlantSelectionModal from './components/PlantSelectionModal';
+import ZoneSelection from './components/ZoneSelection';
 import axios from 'axios';
 import './App.css';
 
-const SOCKET_SERVER_URL = 'http://localhost:3000'; // ← giữ nguyên
-const DEVICE_KEY = 'esp32_vuonrau';
-
-const getInitialLoginState = () => {
-    const token = localStorage.getItem('token');
-    const username = localStorage.getItem('username');
-    return {
-        isLoggedIn: !!token,
-        user: token ? (username || 'Người dùng') : ''
-    };
-};
+const SOCKET_SERVER_URL = 'http://localhost:3000';
 
 function App() {
-    const initialState = getInitialLoginState();
-    const [isLoggedIn, setIsLoggedIn] = useState(initialState.isLoggedIn);
-    const [user, setUser] = useState(initialState.user);
-    const [currentPage, setCurrentPage] = useState('dashboard');
+    // ============== TRẠNG THÁI ĐĂNG NHẬP & PHÂN QUYỀN ==============
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [user, setUser] = useState('');
+    const [availableZones, setAvailableZones] = useState([]);
+    const [selectedZone, setSelectedZone] = useState(null);
+
+    // ============== TRẠNG THÁI CÂY & DASHBOARD ==============
     const [activePlant, setActivePlant] = useState(null);
-    const [isModalOpen, setIsModalOpen] = useState(initialState.isLoggedIn && !activePlant);
     const [activePlantType, setActivePlantType] = useState(null);
-    // ==================== ĐOẠN NÀY ĐƯỢC COPY NGUYÊN TỪ DASHBOARD.JSX ====================
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [currentPage, setCurrentPage] = useState('dashboard');
+
+    // Socket & dữ liệu realtime
     const [latestData, setLatestData] = useState({});
     const [historyData, setHistoryData] = useState([]);
     const [status, setStatus] = useState('Connecting...');
     const socketRef = useRef(null);
 
+    // ============== SOCKET.IO ==============
     useEffect(() => {
         const socket = io(SOCKET_SERVER_URL);
         socketRef.current = socket;
 
-        console.log("Socket.IO connecting...");
-
         socket.on("connect", () => {
             console.log("Socket connected!");
             setStatus('Connected');
-
             if (activePlant?._id) {
-                console.log(`[FE] send active on connect: ${activePlant._id}`);
                 socket.emit("set_active_plant", activePlant._id);
             }
         });
 
-        socket.on("disconnect", () => {
-            console.log("Socket disconnected");
-            setStatus('Disconnected');
-        });
+        socket.on("disconnect", () => setStatus('Disconnected'));
 
         socket.on("initial_data", (data) => {
-            console.log(`[INIT] ${data.length} history records`);
             if (data.length > 0) {
                 setLatestData(data[data.length - 1]);
                 setHistoryData(data);
-            } else {
-                setLatestData({});
-                setHistoryData([]);
             }
         });
 
@@ -76,118 +62,174 @@ function App() {
         });
 
         return () => socket.disconnect();
-    }, []); // ← giữ nguyên dependency rỗng như cũ
+    }, []);
 
     useEffect(() => {
-        if (!socketRef.current || !socketRef.current.connected) return;
-        if (activePlant?._id) {
-            console.log(`[FE] ActivePlant changed → send set_active_plant: ${activePlant._id}`);
+        if (socketRef.current?.connected && activePlant?._id) {
             socketRef.current.emit("set_active_plant", activePlant._id);
             setStatus('Connected & Active');
-        } else {
-            setStatus('Connected (no plant selected)');
         }
     }, [activePlant]);
-    // ================================================================================
 
-    const handleLoginSuccess = (username) => {
+    // ============== ĐĂNG NHẬP ==============
+    const handleLoginSuccess = (userData, zonesFromServer) => {
+        localStorage.setItem('token', userData.token);
+        localStorage.setItem('username', userData.fullName || userData.username);
+        localStorage.setItem('role', userData.role);
+
         setIsLoggedIn(true);
-        setUser(username);
-        localStorage.setItem('username', username);
-        localStorage.setItem('token', 'valid_jwt_token');
+        setUser(userData.fullName || userData.username);
+        setAvailableZones(zonesFromServer);
 
-        if (!activePlant) {
-            setIsModalOpen(true);
+        if (zonesFromServer.length === 1) {
+            setSelectedZone(zonesFromServer[0]);
         }
     };
 
     const handleLogout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('username');
+        localStorage.clear();
         setIsLoggedIn(false);
         setUser('');
-        setCurrentPage('dashboard');
+        setAvailableZones([]);
+        setSelectedZone(null);
         setActivePlant(null);
         setIsModalOpen(false);
     };
 
-const selectActivePlantInApp = useCallback((plant) => {
-  console.log('=====================================');
-  console.log('SELECT PLANT ĐƯỢC GỌI!');
-  console.log('→ plant nhận được:', plant);
-  console.log('→ plant._id:', plant?._id);
-  console.log('→ plant.name:', plant?.name);
-  console.log('→ plant.plant_type_id (có phải object?):', plant?.plant_type_id);
-  
-  if (plant?.plant_type_id) {
-    console.log('LOẠI CÂY ĐÃ CÓ SẴN, SIÊU ĐẸP!');
-    console.log('   • Tên loại cây:', plant.plant_type_id.name);
-    console.log('   • Thresholds mẫu:', plant.plant_type_id.thresholds);
-    console.log('   • Warnings mẫu:', plant.plant_type_id.warnings);
-    console.log('   • Mô tả:', plant.plant_type_id.description);
-  } else {
-    console.warn('KHÔNG CÓ plant_type_id – có thể backend chưa populate!');
-  }
-  console.log('=====================================');
+    useEffect(() => {
+        window.resetToZoneSelection = () => {
+            setSelectedZone(null);
+            setActivePlant(null);
+            setIsModalOpen(false);
+        };
+        return () => delete window.resetToZoneSelection;
+    }, []);
 
-  setActivePlant(plant);
-  setIsModalOpen(false);
-  setActivePlantType(plant?.plant_type_id || null);
-}, []);
+    // ============== CHỌN CÂY ==============
+    const selectActivePlantInApp = useCallback((plant) => {
+        console.log('Cây được chọn:', plant.name);
+        setActivePlant(plant);
+        setActivePlantType(plant?.plant_type_id || null);
+        setIsModalOpen(false);
+    }, []);
 
-    const renderPage = () => {
-  const componentProps = {
-    activePlant,
-    activePlantType,           // TRUYỀN TYPE ĐÃ CÓ SẴN
-    selectActivePlant: selectActivePlantInApp,
-    latestData,
-    status,
-    historyData
-  };
-
-  switch (currentPage) {
-    case 'dashboard':
-      return <Dashboard {...componentProps} />;
-    case 'history':
-      return <History activePlant={activePlant} historyData={historyData} />;
-    default:
-      return <Dashboard {...componentProps} />;
-  }
-};
-
+    // ============== RENDER ==============
     if (!isLoggedIn) {
         return <Login onLoginSuccess={handleLoginSuccess} />;
     }
 
+    if (!selectedZone) {
+        return (
+            <>
+                <header className="header" style={{
+                    backgroundColor: '#00593F',
+                    color: 'white',
+                    padding: '15px 30px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <h1 style={{ margin: 0 }}>SmartGarden</h1>
+                    <div>
+                        <span style={{ marginRight: '20px', fontWeight: 'bold' }}>
+                            Xin chào, {user}
+                        </span>
+                        <button onClick={handleLogout} style={{
+                            padding: '8px 16px',
+                            background: '#FF4444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer'
+                        }}>
+                            Đăng xuất
+                        </button>
+                    </div>
+                </header>
+
+                <ZoneSelection
+                    zones={availableZones}
+                    onSelectZone={(zone) => {
+                        setSelectedZone(zone);
+                        setActivePlant(null);
+                        setTimeout(() => setIsModalOpen(true), 100);
+                    }}
+                />
+            </>
+        );
+    }
+
+    // ============== GIAO DIỆN CHÍNH – CÓ NÚT BACK NGAY CẠNH NÚT ĐỔI CÂY ==============
     return (
         <>
-            {/* Header – giữ nguyên hoàn toàn */}
             <header className="header">
                 <div className="app-title">
-                    <span style={{ marginRight: '10px' }}>SmartGarden</span>
+                    <span style={{ marginRight: '10px', fontSize: '1.5em' }}>SmartGarden</span>
+                    <div style={{
+                        display: 'inline-block',
+                        background: '#00593F',
+                        color: 'white',
+                        padding: '6px 14px',
+                        borderRadius: '20px',
+                        fontSize: '0.9em',
+                        marginRight: '10px'
+                    }}>
+                        Khu vực: {selectedZone.name}
+                    </div>
                     {activePlant && (
-                        <div style={{ padding: '5px 12px', backgroundColor: '#FF8C00', color: 'white', borderRadius: '20px', fontWeight: 'bold', fontSize: '0.9em', display: 'inline-block' }}>
-                            Đang theo dõi: {activePlant.name}
+                        <div style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#FF8C00',
+                            color: 'white',
+                            borderRadius: '20px',
+                            fontWeight: 'bold',
+                            fontSize: '0.9em',
+                            display: 'inline-block'
+                        }}>
+                            Cây: {activePlant.name}
                         </div>
                     )}
                 </div>
 
                 <div className="user-info">
+                    {/* NÚT BACK – ĐẶT NGAY TRƯỚC NÚT ĐỔI CÂY, THIẾT KẾ GIỐNG HỆT */}
+                    <button
+                        onClick={() => {
+                            setSelectedZone(null);
+                            setActivePlant(null);
+                            setIsModalOpen(false);
+                        }}
+                        style={{
+                            padding: '8px 15px',
+                            marginRight: '12px',
+                            backgroundColor: '#00593F',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                            fontWeight: 'bold'
+                        }}
+                    >
+                        ← Back
+                    </button>
+
+                    {/* Nút Đổi cây / Chọn cây – giữ nguyên */}
                     <button
                         onClick={() => setIsModalOpen(true)}
                         style={{
                             padding: '8px 15px',
                             marginRight: '20px',
-                            border: 'none',
-                            borderRadius: '5px',
                             backgroundColor: '#00593F',
                             color: 'white',
+                            border: 'none',
+                            borderRadius: '5px',
                             cursor: 'pointer',
                             fontWeight: 'bold'
                         }}
                     >
-                        Chọn Cây
+                        {activePlant ? 'Đổi cây' : 'Chọn cây'}
                     </button>
+
                     <span style={{ marginRight: '15px', fontWeight: 'bold' }}>
                         Xin chào, {user}
                     </span>
@@ -204,13 +246,24 @@ const selectActivePlantInApp = useCallback((plant) => {
                             Dashboard
                         </a>
                         <a href="#" onClick={() => setCurrentPage('history')} className={currentPage === 'history' ? 'active' : ''}>
-                            History
+                            Lịch sử
                         </a>
                     </div>
                 </nav>
 
                 <main className="main-content">
-                    {renderPage()}
+                    {currentPage === 'dashboard' ? (
+                        <Dashboard
+                            activePlant={activePlant}
+                            activePlantType={activePlantType}
+                            selectActivePlant={selectActivePlantInApp}
+                            latestData={latestData}
+                            status={status}
+                            historyData={historyData}
+                        />
+                    ) : (
+                        <History activePlant={activePlant} historyData={historyData} />
+                    )}
                 </main>
             </div>
 
@@ -219,7 +272,8 @@ const selectActivePlantInApp = useCallback((plant) => {
                 onClose={() => setIsModalOpen(false)}
                 onSelect={selectActivePlantInApp}
                 currentActivePlant={activePlant}
-                deviceKey={DEVICE_KEY}
+                zoneId={selectedZone?.zoneId}
+                deviceKey="esp32_vuonrau"
             />
         </>
     );
