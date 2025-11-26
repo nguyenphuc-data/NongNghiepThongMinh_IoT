@@ -141,3 +141,7 @@ server.listen(PORT, () => {
   console.log('   KHÔNG CÒN TOKEN, KHÔNG CÒN LỖI 401, KHÔNG CÒN INTERCEPTOR');
   console.log('   ĐĂNG NHẬP 1 LẦN → DÙNG 30 NGÀY!\n');
 });
+
+const recognitionRoutes = require('./routes/recognitionRoutes');
+
+app.use('/api/recognitions', recognitionRoutes);
