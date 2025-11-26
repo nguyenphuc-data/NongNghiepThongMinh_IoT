@@ -1,7 +1,7 @@
 // src/components/PlantSelectionModal.jsx
-// PHIÊN BẢN HOÀN CHỈNH – CHỈ THÊM TÍNH NĂNG LẤY LOẠI CÂY THEO ZONE (plantTypes)
+// PHIÊN BẢN HOÀN CHỈNH CUỐI CÙNG – ĐẸP + MẠNH + CÓ WARNINGS + THEO ZONE
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import axiosClient from '../api/axiosClient';
 
@@ -27,42 +27,112 @@ const PlantSelectionModal = ({
   const [latestAI, setLatestAI] = useState(null);
 
   const [showAdvancedAdd, setShowAdvancedAdd] = useState(false);
-  const [step, setStep] = useState('list');
+  const [step, setStep] = useState('list'); // 'list' | 'add' | 'customize'
+
   const [newPlantData, setNewPlantData] = useState({
     name: '',
     useAI: false,
     plantTypeId: ''
   });
+
   const [thresholds, setThresholds] = useState({});
+  const [warnings, setWarnings] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const resetForm = () => {
+    setNewPlantData({
+      name: '',
+      useAI: false,
+      plantTypeId: ''
+    });
+    setThresholds({});
+    setWarnings({});
+    setStep('list');
+    setShowAdvancedAdd(false);
+  };
 
   const isAdmin = localStorage.getItem('role') === 'admin';
 
-  // === CHỈ THÊM ĐOẠN NÀY: LẤY LOẠI CÂY TỪ ZONE (HỖ TRỢ CẢ STRING & OBJECT) ===
-  const allowedPlantTypes = Array.isArray(zoneData?.plantTypes)
-    ? zoneData.plantTypes.map(item => {
-        if (typeof item === 'string') {
-          return { id: item, name: item };
-        }
-        if (item && item.name) {
-          return { id: item._id || item.name, name: item.name };
-        }
-        return null;
-      }).filter(Boolean)
-    : [];
+  // ====== LẤY DANH SÁCH LOẠI CÂY ĐƯỢC PHÉP TRONG ZONE ======
+  // Ngay sau useMemo của allowedPlantTypes
+const allowedPlantTypes = useMemo(() => {
+  if (!zoneData?.plantTypes || !Array.isArray(zoneData.plantTypes)) return [];
 
-  // AI gợi ý – tìm trong allowedPlantTypes
-  const getAIPlantTypeId = () => {
+  const result = zoneData.plantTypes.map(item => {
+    if (typeof item === 'string') {
+      return {
+        _id: item,
+        displayName: item.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      };
+    }
+
+    const id = item._id || item.code || item.id;
+    const name = item.name || (item.code ? item.code.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Không tên');
+    return { _id: id, displayName: name };
+  }).filter(Boolean);
+
+  console.log('=== ALLOWED PLANT TYPES (sau xử lý) ===');
+  console.log(result.map(t => ({ _id: t._id, displayName: t.displayName })));
+
+  return result;
+}, [zoneData?.plantTypes]);
+
+  // AI gợi ý trong danh sách cho phép
+  const getSuggestedTypeId = () => {
     if (!latestAI?.predictedName) return '';
-    const predicted = latestAI.predictedName.toLowerCase();
-    const match = allowedPlantTypes.find(t => 
-      t.name.toLowerCase().includes(predicted) || 
-      predicted.includes(t.name.toLowerCase())
-    );
-    return match?.id || allowedPlantTypes[0]?.id || '';
-  };
-  // ============================================================
+    const predicted = latestAI.predictedName.toLowerCase().trim();
 
+    const match = allowedPlantTypes.find(t => {
+      const name = t.displayName.toLowerCase();
+      const code = t._id.toLowerCase();
+      return name.includes(predicted) || predicted.includes(name) || code.includes(predicted.replace(/\s+/g, '_'));
+    });
+
+    return match?._id || allowedPlantTypes[0]?._id || '';
+  };
+
+  // ====== TẢI CHI TIẾT PLANTTYPE ĐỂ LẤY THRESHOLDS + WARNINGS ======
+  const loadPlantTypeDetails = async (typeId) => {
+    if (!typeId) return;
+    try {
+      // Route mới: hỗ trợ cả _id và code (ca_chua, bi_do, rau_muong, ...)
+      const res = await axiosClient.get(`/plants/types/${typeId}`);
+      const t = res.data;
+
+      setThresholds({
+        temp_min: t.thresholds?.temp_min ?? 20,
+        temp_max: t.thresholds?.temp_max ?? 32,
+        air_humidity_min: t.thresholds?.air_humidity_min ?? 45,
+        air_humidity_max: t.thresholds?.air_humidity_max ?? 85,
+        soil_moisture_min: t.thresholds?.soil_moisture_min ?? 40,
+        soil_moisture_max: t.thresholds?.soil_moisture_max ?? 75,
+        auto_water_duration: t.thresholds?.auto_water_duration ?? 10
+      });
+
+      setWarnings({
+        temp_min: t.warnings?.temp_min || "Nhiệt độ quá thấp, cây dễ bị sốc lạnh.",
+        temp_max: t.warnings?.temp_max || "Nhiệt độ quá cao, lá dễ bị cháy!",
+        air_humidity_min: t.warnings?.air_humidity_min || "Độ ẩm không khí thấp, cây mất nước nhanh.",
+        air_humidity_max: t.warnings?.air_humidity_max || "Độ ẩm không khí quá cao, dễ bị nấm mốc.",
+        soil_moisture_min: t.warnings?.soil_moisture_min || "Đất khô quá! Cần tưới ngay.",
+        soil_moisture_max: t.warnings?.soil_moisture_max || "Đất quá ẩm, dễ thối rễ."
+      });
+    } catch (err) {
+      console.error("Lỗi tải loại cây:", err.response || err);
+      alert("Không thể tải thông tin loại cây!");
+    }
+  };
+
+  // Khi chuyển sang bước customize → load dữ liệu
+  useEffect(() => {
+  if (step === 'customize' && newPlantData.plantTypeId) {
+    // CHỈ GỌI API NẾU thresholds CHƯA CÓ DỮ LIỆU (nghĩa là lần đầu vào customize)
+    if (Object.keys(thresholds).length === 0) {
+      loadPlantTypeDetails(newPlantData.plantTypeId);
+    }
+  }
+}, [step, newPlantData.plantTypeId, thresholds]); // thêm thresholds vào dependency
+
+  // ====== FETCH DATA ======
   const fetchPlants = useCallback(async () => {
     if (!zoneId || !isOpen) return;
     setLoading(true);
@@ -93,126 +163,133 @@ const PlantSelectionModal = ({
     }
   }, [isOpen, fetchPlants, fetchLatestAI]);
 
+  // ====== XÓA CÂY (ADMIN) ======
   const handleDeletePlant = async (plantId, plantName) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa cây "${plantName}"?\n\nHành động này không thể hoàn tác!`)) {
-      return;
-    }
-
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa cây "${plantName}"?\n\nHành động này không thể hoàn tác!`)) return;
     try {
-      // GỌI ĐÚNG API XÓA CÂY
       await axiosClient.delete(`/plants/${plantId}`);
-      
-      alert(`Đã xóa cây "${plantName}" thành công!`);
-      
-      // Cập nhật lại danh sách cây
       setPlants(prev => prev.filter(p => p._id !== plantId));
-      
-      // Nếu cây đang được chọn bị xóa → bỏ chọn
-      if (currentActivePlant?._id === plantId) {
-        onSelect(null);
-      }
+      if (currentActivePlant?._id === plantId) onSelect(null);
+      alert(`Đã xóa cây "${plantName}" thành công!`);
     } catch (err) {
-      console.error('Lỗi xóa cây:', err);
-      alert(err.response?.data?.message || 'Không thể xóa cây. Vui lòng thử lại!');
+      alert(err.response?.data?.message || "Lỗi xóa cây");
     }
   };
 
-  const saveAdvancedPlant = async () => {
-    if (!newPlantData.name.trim()) return alert('Nhập tên cây!');
-    if (!newPlantData.plantTypeId) return alert('Chọn loại cây!');
+  // ====== LƯU CÂY MỚI ======
+  const savePlant = async () => {
+  if (!newPlantData.name.trim()) return alert("Vui lòng nhập tên cây!");
+  if (!newPlantData.plantTypeId) return alert("Vui lòng chọn loại cây!");
 
-    setSubmitting(true);
-    try {
-      const payload = {
-        name: newPlantData.name.trim(),
-        plantTypeId: newPlantData.plantTypeId,
-        zoneId,
-        deviceId: deviceKey,
-        datePlanted: new Date().toISOString().split('T')[0],
-        thresholds,
-        warnings: {}
-      };
+  // KHÔNG cần kiểm tra thresholds ở đây nữa
+  // Vì useEffect đã đảm bảo: khi vào customize là có dữ liệu rồi
 
-      const res = await axiosClient.post('/plants', payload);
-      setPlants(prev => [...prev, res.data]);
-      onSelect(res.data);
-      onClose();
-      alert('Thêm cây thành công!');
-    } catch (err) {
-      console.error(err);
-      alert(err.response?.data?.message || 'Không thể thêm cây!');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  setSubmitting(true);
+  try {
+    const payload = {
+      name: newPlantData.name.trim(),
+      plantTypeId: newPlantData.plantTypeId,
+      zoneId,
+      deviceId: deviceKey,
+      thresholds,     // ← đúng cái người dùng đã chỉnh sửa (hoặc mặc định nếu không sửa)
+      warnings        // ← đúng cái người dùng đã chỉnh sửa
+    };
+
+    const res = await axiosClient.post('/plants', payload);
+    setPlants(prev => [...prev, res.data]);
+    onSelect(res.data);
+    resetForm();
+    onClose();
+  } catch (err) {
+    alert(err.response?.data?.message || "Không thể thêm cây!");
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   if (!isOpen) return null;
 
-  
-
-  // BƯỚC 3: TÙY CHỈNH NGƯỠNG
+  // ====================== BƯỚC 3: TÙY CHỈNH NGƯỠNG (ĐẸP NHƯ CŨ) ======================
   if (showAdvancedAdd && step === 'customize') {
-    // ... giữ nguyên toàn bộ phần customize như cũ của bạn
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-        <div style={{ background: 'white', borderRadius: 36, width: '92vw', maxWidth: 800, maxHeight: '94vh', padding: 44, overflowY: 'auto', boxShadow: '0 50px 140px rgba(0,0,0,0.5)', position: 'relative' }}>
-          <button onClick={() => setStep('add')} style={{ position: 'absolute', top: 20, left: 24, fontSize: '2.4em', background: 'none', border: 'none', color: THEME.SUCCESS, cursor: 'pointer' }}>Back</button>
-          <button onClick={onClose} style={{ position: 'absolute', top: 20, right: 24, width: 50, height: 50, borderRadius: '50%', background: '#f0f0f0', fontSize: '1.9em', color: '#999' }}>Close</button>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
+        <div style={{ background: 'white', borderRadius: 28, width: '94vw', maxWidth: 780, maxHeight: '94vh', padding: '40px 44px', overflowY: 'auto', boxShadow: '0 40px 120px rgba(0,0,0,0.5)', fontFamily: '"Segoe UI", system-ui, sans-serif' }}>
+          <button onClick={() => setStep('add')} style={{ position: 'absolute', top: 18, left: 20, background: 'none', border: 'none', fontSize: '2em', color: '#27ae60', fontWeight: 'bold', cursor: 'pointer' }}>Back</button>
+          <button onClick={()=>{resetForm(); onClose();}} style={{ position: 'absolute', top: 18, right: 20, background: '#f1f1f1', border: 'none', width: 44, height: 44, borderRadius: '50%', fontSize: '1.5em', color: '#999', cursor: 'pointer' }}>Close</button>
 
-          <h2 style={{ textAlign: 'center', color: THEME.PRIMARY, fontSize: '2.4em', fontWeight: 900, marginBottom: 16 }}>
-            Tùy Chỉnh Ngưỡng Cho
+          <h2 style={{ textAlign: 'center', color: '#00593F', fontSize: '2.1em', fontWeight: 900, margin: '0 0 6px' }}>
+            Tùy chỉnh ngưỡng
           </h2>
-          <p style={{ textAlign: 'center', fontSize: '2em', fontWeight: 'bold', color: THEME.SUCCESS, marginBottom: 40 }}>
-            {newPlantData.name || 'Cây mới'}
+          <p style={{ textAlign: 'center', fontSize: '1.6em', margin: '0 0 36px', color: '#27ae60', fontWeight: 'bold' }}>
+            {newPlantData.name}
           </p>
 
-          <div style={{ display: 'grid', gap: 28 }}>
-            {[
-              { label: 'Nhiệt độ thấp', key: 'temp_min', unit: '°C', default: 18 },
-              { label: 'Nhiệt độ cao', key: 'temp_max', unit: '°C', default: 32 },
-              { label: 'Độ ẩm không khí thấp', key: 'air_humidity_min', unit: '%', default: 50 },
-              { label: 'Độ ẩm không khí cao', key: 'air_humidity_max', unit: '%', default: 85 },
-              { label: 'Độ ẩm đất khô', key: 'soil_moisture_min', unit: '%', default: 40 },
-              { label: 'Độ ẩm đất ướt', key: 'soil_moisture_max', unit: '%', default: 75 },
-            ].map(item => (
-              <div key={item.key} style={{ background: '#f8fff9', border: '3px solid #86efac', borderRadius: 28, padding: 24 }}>
-                <p style={{ margin: '0 0 12px', fontWeight: 'bold', color: '#00593F', fontSize: '1.2em' }}>
-                  {item.label}
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'center' }}>
-                  <input
-                    type="number"
-                    value={thresholds[item.key] ?? ''}
-                    onChange={e => setThresholds(p => ({ ...p, [item.key]: +e.target.value || item.default }))}
-                    placeholder={item.default.toString()}
-                    style={{ width: 120, padding: '16px', fontSize: '2em', fontWeight: 'bold', textAlign: 'center', borderRadius: 20, border: 'none', background: 'white', boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.12)', color: '#00593F' }}
-                  />
-                  <span style={{ fontSize: '2em', fontWeight: 'bold', color: THEME.SUCCESS }}>{item.unit}</span>
-                </div>
-              </div>
-            ))}
+          <div style={{ display: 'grid', gap: 26 }}>
 
-            <div style={{ background: '#ecfdf5', border: '4px solid #10b981', borderRadius: 32, padding: 40, textAlign: 'center' }}>
-              <p style={{ margin: '0 0 24px', fontSize: '1.5em', fontWeight: 'bold', color: '#00593F' }}>Thời gian tưới tự động</p>
-              <input
-                type="number"
-                value={thresholds.auto_water_duration ?? ''}
-                onChange={e => setThresholds(p => ({ ...p, auto_water_duration: +e.target.value || 10 }))}
-                placeholder="10"
-                style={{ width: 160, padding: '24px', fontSize: '3.5em', fontWeight: 'bold', textAlign: 'center', borderRadius: 32, border: 'none', background: 'white', boxShadow: 'inset 0 6px 16px rgba(0,0,0,0.15)', color: '#00593F' }}
-              />
-              <div style={{ marginTop: 16, fontSize: '1.3em', fontWeight: 'bold', color: '#16a34a' }}>
-                giây (10 giây ≈ 1.2 lít)
+            {/* Nhiệt độ */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22 }}>
+              {[
+                { label: 'Nhiệt độ thấp', key: 'temp_min', unit: '°C', warn: 'temp_min' },
+                { label: 'Nhiệt độ cao', key: 'temp_max', unit: '°C', warn: 'temp_max' }
+              ].map(item => (
+                <div key={item.key} style={{ background: '#f8fff9', border: '2.5px solid #86efac', borderRadius: 24, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <p style={{ margin: 0, fontWeight: 'bold', color: '#00593F', fontSize: '0.98em' }}>{item.label}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input type="number" value={thresholds[item.key] || ''} onChange={e => setThresholds(p => ({ ...p, [item.key]: +e.target.value }))}
+                      style={{ width: 78, padding: '9px 6px', borderRadius: 16, border: 'none', background: 'white', fontSize: '1.22em', fontWeight: 'bold', textAlign: 'center', color: '#000', boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.1)', outline: 'none' }} />
+                    <span style={{ fontSize: '1.28em', color: '#27ae60', fontWeight: 'bold' }}>{item.unit}</span>
+                  </div>
+                  <input type="text" value={warnings[item.warn] || ''} onChange={e => setWarnings(p => ({ ...p, [item.warn]: e.target.value }))}
+                    style={{ padding: '10px 14px', borderRadius: 16, border: '2px solid #d0f8e0', background: 'white', fontSize: '0.92em', color: '#000' }}
+                    placeholder="Cảnh báo khi quá thấp..." />
+                </div>
+              ))}
+            </div>
+
+            {/* Độ ẩm không khí + Đất */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22 }}>
+              {[
+                { label: 'Độ ẩm không khí thấp', key: 'air_humidity_min', unit: '%', warn: 'air_humidity_min' },
+                { label: 'Độ ẩm không khí cao', key: 'air_humidity_max', unit: '%', warn: 'air_humidity_max' },
+                { label: 'Độ ẩm đất khô', key: 'soil_moisture_min', unit: '%', warn: 'soil_moisture_min' },
+                { label: 'Độ ẩm đất ướt', key: 'soil_moisture_max', unit: '%', warn: 'soil_moisture_max' }
+              ].map(item => (
+                <div key={item.key} style={{ background: '#f8fff9', border: '2.5px solid #86efac', borderRadius: 24, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <p style={{ margin: 0, fontWeight: 'bold', color: '#00593F', fontSize: '0.98em' }}>{item.label}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input type="number" value={thresholds[item.key] || ''} onChange={e => setThresholds(p => ({ ...p, [item.key]: +e.target.value }))}
+                      style={{ width: 78, padding: '9px 6px', borderRadius: 16, border: 'none', background: 'white', fontSize: '1.22em', fontWeight: 'bold', textAlign: 'center', color: '#000', boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.1)', outline: 'none' }} />
+                    <span style={{ fontSize: '1.28em', color: '#27ae60', fontWeight: 'bold' }}>{item.unit}</span>
+                  </div>
+                  <input type="text" value={warnings[item.warn] || ''} onChange={e => setWarnings(p => ({ ...p, [item.warn]: e.target.value }))}
+                    style={{ padding: '10px 14px', borderRadius: 16, border: '2px solid #d0f8e0', background: 'white', fontSize: '0.92em', color: '#000' }}
+                    placeholder="Cảnh báo tùy chỉnh..." />
+                </div>
+              ))}
+            </div>
+
+            {/* Thời gian tưới tự động */}
+            <div style={{ background: '#f0fdf4', border: '3px solid #86efac', borderRadius: 28, padding: 28, textAlign: 'center', marginTop: 12 }}>
+              <p style={{ margin: '0 0 18px', fontWeight: 'bold', color: '#00593F', fontSize: '1.18em' }}>Thời gian tưới tự động</p>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 18 }}>
+                <input type="number" value={thresholds.auto_water_duration || ''} onChange={e => setThresholds(p => ({ ...p, auto_water_duration: +e.target.value }))}
+                  style={{ width: 126, padding: '15px 10px', borderRadius: 26, border: 'none', background: 'white', fontSize: '2em', fontWeight: 'bold', textAlign: 'center', color: '#000', boxShadow: 'inset 0 3px 10px rgba(0,0,0,0.12)', outline: 'none' }}
+                  placeholder="10" />
+                <div>
+                  <span style={{ fontSize: '1.45em', fontWeight: 'bold', color: '#27ae60' }}>giây</span><br />
+                  <span style={{ fontSize: '0.96em', color: '#555' }}>(8 giây ≈ 1 lít)</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginTop: 48 }}>
-            <button onClick={() => setStep('add')} style={{ padding: '18px 48px', background: '#f1f5f9', color: '#475569', borderRadius: 32, fontWeight: 'bold', fontSize: '1.1em', border: 'none' }}>
-              Back Quay lại
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 22, marginTop: 38 }}>
+            <button onClick={() => setStep('add')} style={{ padding: '14px 42px', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: 28, fontWeight: 'bold', fontSize: '1.05em' }}>
+              ← Quay lại
             </button>
-            <button onClick={saveAdvancedPlant} disabled={submitting} style={{ padding: '20px 64px', background: THEME.SUCCESS, color: 'white', borderRadius: 32, fontWeight: 'bold', fontSize: '1.3em', border: 'none', boxShadow: '0 8px 25px rgba(39,174,96,0.4)' }}>
-              {submitting ? 'Đang lưu...' : 'Hoàn tất & Theo dõi ngay'}
+            <button onClick={savePlant} disabled={submitting}
+              style={{ padding: '16px 58px', background: '#27ae60', color: 'white', border: 'none', borderRadius: 30, fontWeight: 'bold', fontSize: '1.15em', boxShadow: '0 12px 35px rgba(39,174,96,0.4)' }}>
+              {submitting ? 'Đang lưu...' : 'Hoàn tất & Kích hoạt'}
             </button>
           </div>
         </div>
@@ -220,35 +297,22 @@ const PlantSelectionModal = ({
     );
   }
 
-  // BƯỚC 2: FORM THÊM CÂY (ĐÃ XÓA AI CARD & FIX MÀU CHỮ)
+  // ====================== BƯỚC 2: FORM THÊM CÂY ======================
   if (showAdvancedAdd && step === 'add') {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-        <div style={{ background: 'white', borderRadius: 36, width: '92vw', maxWidth: 660, padding: '48px 56px', boxShadow: '0 50px 140px rgba(0,0,0,0.5)', position: 'relative' }}>
-          <button onClick={() => { setShowAdvancedAdd(false); setStep('list'); }} style={{ position: 'absolute', top: 24, right: 24, width: 50, height: 50, borderRadius: '50%', background: '#f0f0f0', fontSize: '1.9em', color: '#999', border: 'none', cursor: 'pointer' }}>×</button>
+        <div style={{ background: 'white', borderRadius: 36, width: '92vw', maxWidth: 660, padding: '48px 56px', boxShadow: '0 50px 140px rgba(prenominal 0,0,0,0.5)', position: 'relative' }}>
+          <button onClick={() => { resetForm(); onClose(); }} style={{ position: 'absolute', top: 24, right: 24, width: 50, height: 50, borderRadius: '50%', background: '#f0f0f0', fontSize: '1.9em', color: '#999', border: 'none', cursor: 'pointer' }}>×</button>
 
           <h2 style={{ textAlign: 'center', color: THEME.PRIMARY, fontSize: '2.4em', fontWeight: 900, marginBottom: 40 }}>Thêm Cây Mới</h2>
 
-          {/* Ô NHẬP TÊN: NỀN TRẮNG - CHỮ ĐEN */}
           <input
             type="text"
             placeholder="Tên cây (VD: Cà chua vườn chính)"
             value={newPlantData.name}
             onChange={e => setNewPlantData(p => ({ ...p, name: e.target.value }))}
-            style={{ 
-              width: '100%', 
-              padding: '18px 24px', 
-              fontSize: '1.2em', 
-              borderRadius: 24, 
-              border: '3px solid #86efac', 
-              marginBottom: 32,
-              background: '#ffffff', // Nền trắng tuyệt đối
-              color: '#000000',      // Chữ đen tuyệt đối
-              fontWeight: 600
-            }}
+            style={{ width: '100%', padding: '18px 24px', fontSize: '1.2em', borderRadius: 24, border: '3px solid #86efac', marginBottom: 32, background: '#ffffff', color: '#000000', fontWeight: 600 }}
           />
-
-          {/* ĐÃ XÓA PHẦN AI GỢI Ý (CARD XANH) Ở ĐÂY */}
 
           <h3 style={{ margin: '10px 0 20px', fontSize: '1.5em', fontWeight: 'bold', color: THEME.PRIMARY }}>Chọn loại cây</h3>
 
@@ -258,62 +322,37 @@ const PlantSelectionModal = ({
             </p>
           ) : (
             <>
-              {/* Nút chọn chế độ: Chữ đen cho dễ đọc */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 }}>
-                <label style={{ 
-                    padding: 28, 
-                    background: newPlantData.useAI ? '#f9f9f9' : '#e8f7f3', 
-                    border: `4px solid ${newPlantData.useAI ? '#ccc' : THEME.PRIMARY}`, 
-                    borderRadius: 28, 
-                    cursor: 'pointer', 
-                    textAlign: 'center',
-                    color: '#000000' // Chữ đen
-                  }}
+                <label style={{ padding: 28, background: newPlantData.useAI ? '#f9f9f9' : '#e8f7f3', border: `4px solid ${newPlantData.useAI ? '#ccc' : THEME.PRIMARY}`, borderRadius: 28, cursor: 'pointer', textAlign: 'center', color: '#000000' }}
                   onClick={() => setNewPlantData(p => ({ ...p, useAI: false }))}>
                   <div style={{ fontSize: '1.3em', marginBottom: 12, fontWeight: 'bold' }}>Chọn thủ công</div>
                   <div style={{ width: 32, height: 32, borderRadius: '50%', background: newPlantData.useAI ? '#ccc' : 'white', border: `6px solid ${newPlantData.useAI ? '#ccc' : THEME.PRIMARY}`, margin: '0 auto' }} />
                 </label>
 
-                <label style={{ 
-                    padding: 28, 
-                    background: newPlantData.useAI ? '#e8f7f3' : '#f9f9f9', 
-                    border: `4px solid ${newPlantData.useAI ? THEME.PRIMARY : '#ccc'}`, 
-                    borderRadius: 28, 
-                    cursor: latestAI ? 'pointer' : 'not-allowed', 
-                    opacity: latestAI ? 1 : 0.5,
-                    color: '#000000' // Chữ đen
-                  }}
-                  onClick={() => latestAI && setNewPlantData(p => ({ ...p, useAI: true, plantTypeId: getAIPlantTypeId() }))}>
+                <label style={{ padding: 28, background: newPlantData.useAI ? '#e8f7f3' : '#f9f9f9', border: `4px solid ${newPlantData.useAI ? THEME.PRIMARY : '#ccc'}`, borderRadius: 28, cursor: latestAI ? 'pointer' : 'not-allowed', opacity: latestAI ? 1 : 0.5, color: '#000000' }}
+                  onClick={() => latestAI && setNewPlantData(p => ({ ...p, useAI: true, plantTypeId: getSuggestedTypeId() }))}>
                   <div style={{ fontSize: '1.3em', marginBottom: 12, fontWeight: 'bold' }}>Dùng AI</div>
                   <div style={{ width: 32, height: 32, borderRadius: '50%', background: newPlantData.useAI ? 'white' : '#ccc', border: `6px solid ${newPlantData.useAI ? THEME.PRIMARY : '#ccc'}`, margin: '0 auto' }} />
                 </label>
               </div>
 
               {!newPlantData.useAI ? (
-                // MENU CHỌN: NỀN TRẮNG - CHỮ ĐEN
                 <select
                   value={newPlantData.plantTypeId}
                   onChange={e => setNewPlantData(p => ({ ...p, plantTypeId: e.target.value }))}
-                  style={{ 
-                    width: '100%', 
-                    padding: '18px', 
-                    fontSize: '1.2em', 
-                    borderRadius: 24, 
-                    border: '3px solid #86efac',
-                    background: '#ffffff', // Nền trắng
-                    color: '#000000',      // Chữ đen
-                    fontWeight: 600
-                  }}
+                  style={{ width: '100%', padding: '18px', fontSize: '1.2em', borderRadius: 24, border: '3px solid #86efac', background: '#ffffff', color: '#000000', fontWeight: 600 }}
                 >
-                  <option value="" style={{ color: '#888' }}>-- Chọn loại cây --</option>
+                  <option value="">-- Chọn loại cây --</option>
                   {allowedPlantTypes.map(t => (
-                    <option key={t.id} value={t.id} style={{ color: '#000' }}>{t.name}</option>
+                    <option key={t._id} value={t._id}>
+                      {t.displayName}   {/* ← hiển thị tên đẹp */}
+                    </option>
                   ))}
                 </select>
               ) : (
                 <div style={{ padding: 28, background: '#ecfdf5', border: '4px solid #10b981', borderRadius: 28, textAlign: 'center' }}>
                   <p style={{ margin: 0, fontSize: '1.6em', fontWeight: 'bold', color: THEME.PRIMARY }}>
-                    {allowedPlantTypes.find(t => t.id === newPlantData.plantTypeId)?.name || latestAI.predictedName}
+                    {allowedPlantTypes.find(t => t._id === newPlantData.plantTypeId)?.name || latestAI?.predictedName || 'Đang chọn...'}
                   </p>
                   <p style={{ margin: '8px 0 0', color: '#059669' }}>Đã chọn tự động từ AI</p>
                 </div>
@@ -322,17 +361,17 @@ const PlantSelectionModal = ({
           )}
 
           <div style={{ display: 'flex', gap: 20, marginTop: 40, justifyContent: 'center' }}>
-            <button onClick={() => { setShowAdvancedAdd(false); setStep('list'); }} style={{ padding: '16px 40px', background: '#f0f0f0', borderRadius: 30, fontWeight: 'bold', color: '#333', border: 'none', cursor: 'pointer' }}>Hủy</button>
+            <button onClick={() => { setShowAdvancedAdd(false); setStep('list'); }} style={{ padding: '16px 40px', background: '#f0f0f0', borderRadius: 30, fontWeight: 'bold', color: '#333', border: 'none' }}>Hủy</button>
             <button
               onClick={() => {
                 if (!newPlantData.name.trim()) return alert('Nhập tên cây!');
                 if (!newPlantData.plantTypeId) return alert('Chọn loại cây!');
                 setStep('customize');
               }}
-              style={{ padding: '16px 48px', background: THEME.PRIMARY, color: 'white', borderRadius: 30, fontWeight: 'bold', fontSize: '1.1em', border: 'none', cursor: 'pointer' }}
+              style={{ padding: '16px 48px', background: THEME.PRIMARY, color: 'white', borderRadius: 30, fontWeight: 'bold', fontSize: '1.1em', border: 'none' }}
               disabled={allowedPlantTypes.length === 0}
             >
-              Tiếp theo
+              Tiếp theo →
             </button>
           </div>
         </div>
@@ -340,7 +379,7 @@ const PlantSelectionModal = ({
     );
   }
 
-  // GIAO DIỆN CHÍNH – GIỮ NGUYÊN
+  // ====================== BƯỚC 1: DANH SÁCH CÂY ======================
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
       <div style={{ background: 'white', borderRadius: 36, width: '90vw', maxWidth: 600, maxHeight: '90vh', overflow: 'hidden', boxShadow: '0 40px 120px rgba(0,0,0,0.48)', position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -363,33 +402,14 @@ const PlantSelectionModal = ({
             }}>
               {isAdmin && (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeletePlant(plant._id, plant.name);
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 12,
-                    right: 12,
-                    width: 40,
-                    height: 40,
-                    background: THEME.DANGER,
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '50%',
-                    fontSize: '1.4em',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(231,76,60,0.4)'
-                  }}
+                  onClick={(e) => { e.stopPropagation(); handleDeletePlant(plant._id, plant.name); }}
+                  style={{ position: 'absolute', top: 12, right: 12, width: 40, height: 40, background: THEME.DANGER, color: 'white', border: 'none', borderRadius: '50%', fontSize: '1.4em', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 12px rgba(231,76,60,0.4)' }}
                   title="Xóa cây này"
-                >
-                  ×
-                </button>
+                >×</button>
               )}
               <h3 style={{ margin: 0, fontWeight: 'bold' }}>{plant.name}</h3>
               <p style={{ margin: '8px 0 0', color: '#166534', fontSize: '0.95em' }}>
-                {plant.typeInfo?.name || plant.plantTypeId || 'Chưa xác định'}
+                {plant.typeInfo?.name || plant.plant_type_id.name || 'Chưa xác định'}
               </p>
             </div>
           ))}
@@ -417,7 +437,7 @@ PlantSelectionModal.propTypes = {
   currentActivePlant: PropTypes.object,
   zoneId: PropTypes.string.isRequired,
   deviceKey: PropTypes.string,
-  zoneData: PropTypes.object.isRequired // BẮT BUỘC TRUYỀN
+  zoneData: PropTypes.object.isRequired
 };
 
 export default PlantSelectionModal;

@@ -107,7 +107,7 @@ function App() {
 
     // ============== CHỌN CÂY ==============
     const selectActivePlantInApp = useCallback((plant) => {
-        console.log('Cây được chọn:', plant.name);
+        console.log('Cây được chọn:', plant);
         setActivePlant(plant);
         setActivePlantType(plant?.plant_type_id || null);
         setIsModalOpen(false);
