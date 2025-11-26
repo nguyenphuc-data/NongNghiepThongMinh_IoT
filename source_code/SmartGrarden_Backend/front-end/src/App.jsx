@@ -273,6 +273,7 @@ function App() {
                 onSelect={selectActivePlantInApp}
                 currentActivePlant={activePlant}
                 zoneId={selectedZone?.zoneId}
+                zoneData={selectedZone}
                 deviceKey="esp32_vuonrau"
             />
         </>
