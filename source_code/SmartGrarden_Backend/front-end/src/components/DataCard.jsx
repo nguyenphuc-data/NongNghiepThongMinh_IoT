@@ -1,4 +1,4 @@
-// src/components/DataCard.jsx
+// src/components/DataCard.jsx – PHIÊN BẢN 11/10
 const DataCard = ({ title, value, unit, range, color, status }) => {
   return (
     <div style={{
@@ -8,7 +8,13 @@ const DataCard = ({ title, value, unit, range, color, status }) => {
       textAlign: "center",
       boxShadow: "0 8px 25px rgba(0,0,0,0.1)",
       border: "2px solid #e0e0e0",
-      transition: "all 0.3s"
+      transition: "all 0.3s ease",
+      cursor: "default",
+      ":hover": {
+        transform: "translateY(-6px)",
+        boxShadow: "0 16px 40px rgba(0,0,0,0.18)",
+        borderColor: "#00593F"
+      }
     }}>
       <p style={{ margin: "0 0 8px", fontSize: "0.95em", color: "#555", fontWeight: "bold" }}>
         {title}

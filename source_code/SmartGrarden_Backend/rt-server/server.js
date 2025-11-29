@@ -94,14 +94,48 @@ let recognitionConn = null;
 // === SOCKET.IO + MQTT (giữ nguyên) ===
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
+
+  // === 1. Khi chọn cây → gửi 10 bản ghi gần nhất ===
   socket.on('set_active_plant', async (plantId) => {
     if (!mongoose.Types.ObjectId.isValid(plantId)) return;
+
     socket.leaveAll();
     socket.join(plantId);
     global.CURRENT_ACTIVE_PLANT_ID = plantId;
 
-    const history = await SensorData.find({ plant_id: plantId }).sort({ timestamp: -1 }).limit(10).lean();
-    socket.emit('initial_data', history.reverse());
+    try {
+      const history = await SensorData.find({ plant_id: plantId })
+        .sort({ timestamp: -1 })
+        .limit(10)
+        .lean()
+        .exec();
+
+      socket.emit('initial_data', history.reverse());
+    } catch (err) {
+      console.error('Lỗi lấy initial_data:', err);
+      socket.emit('initial_data', []);
+    }
+  });
+
+  // === 2. Khi yêu cầu toàn bộ lịch sử ===
+  socket.on('request_full_history', async (plantId) => {
+    if (!mongoose.Types.ObjectId.isValid(plantId)) {
+      socket.emit('full_history_data', []);
+      return;
+    }
+
+    try {
+      const fullHistory = await SensorData.find({ plant_id: plantId })
+        .sort({ timestamp: 1 })  // cũ nhất trước
+        .lean()
+        .exec();
+
+      socket.emit('full_history_data', fullHistory);
+      console.log(`Đã gửi toàn bộ lịch sử (${fullHistory.length} bản ghi) cho plant ${plantId}`);
+    } catch (err) {
+      console.error('Lỗi lấy full history:', err);
+      socket.emit('full_history_data', []);
+    }
   });
 });
 
@@ -137,9 +171,6 @@ mongoose.connect(MAIN_DB_URI).then(() => console.log('DB chính kết nối OK')
 
 server.listen(PORT, () => {
   console.log(`\nSMARTGARDEN SERVER CHẠY TẠI http://localhost:${PORT}`);
-  console.log('   ĐÃ CHUYỂN HOÀN TOÀN SANG SESSION');
-  console.log('   KHÔNG CÒN TOKEN, KHÔNG CÒN LỖI 401, KHÔNG CÒN INTERCEPTOR');
-  console.log('   ĐĂNG NHẬP 1 LẦN → DÙNG 30 NGÀY!\n');
 });
 
 const recognitionRoutes = require('./routes/recognitionRoutes');

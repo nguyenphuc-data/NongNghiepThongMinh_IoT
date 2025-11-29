@@ -302,7 +302,60 @@ const allowedPlantTypes = useMemo(() => {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
         <div style={{ background: 'white', borderRadius: 36, width: '92vw', maxWidth: 660, padding: '48px 56px', boxShadow: '0 50px 140px rgba(prenominal 0,0,0,0.5)', position: 'relative' }}>
-          <button onClick={() => { resetForm(); onClose(); }} style={{ position: 'absolute', top: 24, right: 24, width: 50, height: 50, borderRadius: '50%', background: '#f0f0f0', fontSize: '1.9em', color: '#999', border: 'none', cursor: 'pointer' }}>×</button>
+          <button
+  onClick={() => {
+    resetForm();
+    onClose();
+  }}
+  aria-label="Đóng"
+  style={{
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 44,
+    height: 44,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.95)',
+    border: '1px solid rgba(0, 0, 0, 0.09)',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    cursor: 'pointer',
+    zIndex: 1000,
+    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+    outline: 'none',
+    padding: 0,
+    margin: 0,
+
+    // BÍ KÍP CĂN GIỮA HOÀN HẢO 100%
+    display: 'grid',
+    placeItems: 'center',
+
+    // Font + chữ × chuẩn như Apple
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontWeight: '800',
+    fontSize: '22px',        // Chính xác 22px cho × nằm tâm tuyệt đối
+    lineHeight: 1,
+    color: '#666',
+    textAlign: 'center',
+    leadingTrim: 'both',     // Fix nhỏ cho một số trình duyệt
+    textEdge: 'cap',
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.background = 'rgba(254, 226, 226, 0.95)';
+    e.currentTarget.style.color = '#dc2626';
+    e.currentTarget.style.transform = 'scale(1.1)';
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+    e.currentTarget.style.color = '#666';
+    e.currentTarget.style.transform = 'scale(1)';
+  }}
+  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.94)'}
+  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
+>
+  ×
+</button>
 
           <h2 style={{ textAlign: 'center', color: THEME.PRIMARY, fontSize: '2.4em', fontWeight: 900, marginBottom: 40 }}>Thêm Cây Mới</h2>
 
@@ -383,7 +436,43 @@ const allowedPlantTypes = useMemo(() => {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
       <div style={{ background: 'white', borderRadius: 36, width: '90vw', maxWidth: 600, maxHeight: '90vh', overflow: 'hidden', boxShadow: '0 40px 120px rgba(0,0,0,0.48)', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        <button onClick={onClose} style={{ position: 'absolute', top: 24, right: 24, width: 50, height: 50, borderRadius: '50%', background: '#f1f1f1', border: 'none', fontSize: '1.9em', color: '#999', zIndex: 10 }}>×</button>
+        <button
+  onClick={onClose}
+  style={{
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.95)',
+    border: 'none',
+    fontSize: '1.6rem',
+    fontWeight: 'bold',
+    color: '#666',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    backdropFilter: 'blur(10px)',
+    zIndex: 1000,
+    transition: 'all 0.25s ease',
+    outline: 'none'
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+    e.currentTarget.style.color = '#ef4444';
+    e.currentTarget.style.transform = 'scale(1.1)';
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+    e.currentTarget.style.color = '#666';
+    e.currentTarget.style.transform = 'scale(1)';
+  }}
+>
+  ×
+</button>
 
         <div style={{ padding: '36px', background: 'linear-gradient(135deg, #f8fff9 0%, #e8f7f3 100%)', textAlign: 'center' }}>
           <h2 style={{ margin: 0, color: THEME.PRIMARY, fontSize: '2.3em', fontWeight: 900 }}>Chọn Cây Theo Dõi</h2>
@@ -402,10 +491,53 @@ const allowedPlantTypes = useMemo(() => {
             }}>
               {isAdmin && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleDeletePlant(plant._id, plant.name); }}
-                  style={{ position: 'absolute', top: 12, right: 12, width: 40, height: 40, background: THEME.DANGER, color: 'white', border: 'none', borderRadius: '50%', fontSize: '1.4em', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 12px rgba(231,76,60,0.4)' }}
-                  title="Xóa cây này"
-                >×</button>
+  onClick={onClose}
+  aria-label="Đóng"
+  style={{
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: 36,
+    height: 36,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.92)',
+    border: '1px solid rgba(0, 0, 0, 0.08)',
+    fontSize: '1.5rem',
+    fontWeight: '600',
+    color: '#666',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 3px 10px rgba(0, 0, 0, 0.16)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)', // Fix cho Safari
+    zIndex: 1000,
+    transition: 'all 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
+    outline: 'none',
+    userSelect: 'none'
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.background = 'rgba(254, 226, 226, 0.9)';
+    e.currentTarget.style.color = '#dc2626';
+    e.currentTarget.style.transform = 'scale(1.08)';
+    e.currentTarget.style.boxShadow = '0 6px 20px rgba(220, 38, 38, 0.25)';
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.92)';
+    e.currentTarget.style.color = '#666';
+    e.currentTarget.style.transform = 'scale(1)';
+    e.currentTarget.style.boxShadow = '0 3px 10px rgba(0, 0, 0, 0.16)';
+  }}
+  onMouseDown={(e) => {
+    e.currentTarget.style.transform = 'scale(0.95)';
+  }}
+  onMouseUp={(e) => {
+    e.currentTarget.style.transform = 'scale(1.08)';
+  }}
+>
+  ×
+</button>
               )}
               <h3 style={{ margin: 0, fontWeight: 'bold' }}>{plant.name}</h3>
               <p style={{ margin: '8px 0 0', color: '#166534', fontSize: '0.95em' }}>
@@ -421,7 +553,7 @@ const allowedPlantTypes = useMemo(() => {
               width: '100%', padding: '22px', background: '#f0fdf4', border: '3px dashed #00593F', borderRadius: 28,
               fontSize: '1.3em', fontWeight: 'bold', color: '#00593F', cursor: 'pointer'
             }}>
-              + Thêm cây mới (Nâng cao)
+              + Thêm cây mới
             </button>
           </div>
         )}
