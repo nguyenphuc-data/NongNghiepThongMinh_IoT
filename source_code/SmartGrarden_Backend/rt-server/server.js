@@ -19,6 +19,7 @@ const plantRoutes = require('./routes/plantRoutes');
 const authRoutes = require('./routes/auth');
 const plantZoneRoutes = require('./routes/plantZoneRoutes');
 
+
 const PORT = process.env.PORT || 3000;
 const MAIN_DB_URI = process.env.MONGO_URI;
 const RECOG_DB_URI = 'mongodb+srv://pewpewls09_db_user:koFKZBj6jCrQ9mba@iot-sensors.jing9nf.mongodb.net/iot_sensors?appName=IoT-Sensors';
@@ -26,6 +27,7 @@ const ESP32_KEY = 'esp32_vuonrau';
 
 const app = express();
 const server = http.createServer(app);
+const pumpRoutes = require('./routes/pumpRoutes');
 
 // SESSION THAY THẾ TOKEN
 app.use(session({
@@ -46,9 +48,10 @@ app.use(session({
 
 app.use(cors({
   origin: 'http://localhost:5173',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],  // THÊM OPTIONS
+  allowedHeaders: ['Content-Type', 'Authorization'],     // cho phép header
   credentials: true   // cho phép gửi cookie
 }));
-
 app.use(express.json());
 
 // Gắn user từ session vào req
@@ -57,7 +60,7 @@ app.use((req, res, next) => {
   req.user = req.session.user || null;
   next();
 });
-
+app.use('/api/pump', pumpRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/plants', plantRoutes);
 app.use('/api/plants-zone', plantZoneRoutes);

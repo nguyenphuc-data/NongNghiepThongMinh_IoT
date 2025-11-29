@@ -119,7 +119,7 @@ const Dashboard = ({ latestData, status, activePlant }) => {
             { key: 'manual', label: "Thủ công", color: "#22c55e" },
             { key: 'threshold', label: "Tự động Ngưỡng", color: "#f97316" },
             { key: 'schedule', label: "Tự động Lịch", color: "#ca8a04" },
-            { key: 'ai', label: "AI Dự đoán", color: "#0ea5e9" },
+            { key: 'ai', label: "Dự đoán", color: "#0ea5e9" },
           ].map(({ key, label, color }) => (
             <button key={key} onClick={() => setSelectedTab(key)}
               style={{
@@ -153,7 +153,14 @@ const Dashboard = ({ latestData, status, activePlant }) => {
             onToggle={() => setActiveMode(activeMode === 'schedule' ? 'off' : 'schedule')}
           />
         )}
-        {selectedTab === 'ai' && <AIPump isActive={activeMode === 'ai'} onToggle={() => setActiveMode(activeMode === 'ai' ? 'off' : 'ai')} />}
+        {selectedTab === 'ai' && (
+  <AIPump
+    latestData={latestData}
+    activePlant={activePlant}
+    isActive={activeMode === 'ai'}
+    onToggle={() => setActiveMode(activeMode === 'ai' ? 'off' : 'ai')}
+  />
+)}
       </div>
     </div>
   );
