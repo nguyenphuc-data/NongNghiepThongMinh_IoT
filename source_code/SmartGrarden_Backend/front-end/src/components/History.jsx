@@ -1,10 +1,14 @@
-// src/components/History.jsx – SIÊU SẠCH, SIÊU ĐẸP, NGÀY NẰM DƯỚI ĐÁY, KHÔNG CÒN GÌ THỪA!
-import React, { useRef, useEffect, useState } from 'react';
+// src/components/History.jsx – BẢNG CUỘN 10 DÒNG + TÌM KIẾM + SẮP XẾP + XUẤT EXCEL – ĐỈNH CAO 2025!
+import React, { useRef, useEffect, useState, useMemo } from 'react';
+import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const History = ({ activePlant, fullHistoryData = [] }) => {
   const [offsetX, setOffsetX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
+  const [search, setSearch] = useState('');
+  const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
 
   const canvasRefs = {
     temp: useRef(null),
@@ -13,6 +17,7 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
     rain: useRef(null)
   };
 
+  // === BIỂU ĐỒ (giữ nguyên đẹp lung linh) ===
   const getDayLabel = (ts) => {
     const d = new Date(ts);
     return `${d.getDate()}/${d.getMonth() + 1}`;
@@ -43,11 +48,10 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
 
     const padding = 70;
     const chartWidth = w - 2 * padding;
-    const chartHeight = h - 140; // Để dành chỗ cho ngày ở dưới cùng
+    const chartHeight = h - 140;
 
     ctx.clearRect(0, 0, w, h);
 
-    // Tiêu đề + giá trị hiện tại
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 20px system-ui';
     ctx.textAlign = 'center';
@@ -58,7 +62,6 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
     ctx.font = 'bold 40px system-ui';
     ctx.fillText(latest != null ? `${latest.toFixed(1)}${unit}` : '—', w / 2, 98);
 
-    // Vẽ đường line mượt
     ctx.strokeStyle = color;
     ctx.lineWidth = 5;
     ctx.lineCap = 'round';
@@ -71,12 +74,9 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
     });
     ctx.stroke();
 
-    // NGÀY NẰM DƯỚI ĐÁY – SẠCH ĐẸP, KHÔNG CHEN VÀO ĐỒ THỊ
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 18px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom'; // Quan trọng: chữ nằm sát đáy
-
+    ctx.textBaseline = 'bottom';
     const seenDays = new Set();
     validPoints.forEach((p, i) => {
       const dayLabel = getDayLabel(p.ts);
@@ -84,7 +84,7 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
         seenDays.add(dayLabel);
         const x = padding + (i / (validPoints.length - 1)) * chartWidth + offsetX;
         if (x > padding - 80 && x < w - padding + 80) {
-          ctx.fillText(dayLabel, x, h - 12); // Cách đáy 12px → sát dưới cùng
+          ctx.fillText(dayLabel, x, h - 12);
         }
       }
     });
@@ -104,6 +104,63 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
     charts.forEach(c => drawChart(c.ref.current, c.key, c.color, c.title, c.unit));
   }, [fullHistoryData, offsetX]);
 
+  // === BẢNG DỮ LIỆU ĐÃ LỌC + SẮP XẾP ===
+  const tableData = useMemo(() => {
+    let data = [...fullHistoryData];
+
+    // Tìm kiếm
+    if (search.trim()) {
+      const term = search.toLowerCase();
+      data = data.filter(item =>
+        format(new Date(item.timestamp), 'dd/MM/yyyy HH:mm').toLowerCase().includes(term) ||
+        item.temp?.toString().includes(term) ||
+        item.hum?.toString().includes(term) ||
+        item.soil_percent?.toString().includes(term) ||
+        item.rain_percent?.toString().includes(term)
+      );
+    }
+
+    // Sắp xếp
+    if (sortConfig.key) {
+      data.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        if (sortConfig.key === 'timestamp') {
+          aVal = new Date(aVal);
+          bVal = new Date(bVal);
+        }
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return data;
+  }, [fullHistoryData, search, sortConfig]);
+
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
+  const exportToExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(tableData.map(item => ({
+      'Thời gian': format(new Date(item.timestamp), 'dd/MM/yyyy HH:mm:ss'),
+      'Nhiệt độ (°C)': item.temp?.toFixed(1) ?? '-',
+      'Độ ẩm KK (%)': item.hum?.toFixed(1) ?? '-',
+      'Độ ẩm đất (%)': item.soil_percent?.toFixed(1) ?? '-',
+      'Lượng mưa (%)': item.rain_percent?.toFixed(1) ?? '-',
+      'Ánh sáng': item.is_bright ? 'Có' : 'Không',
+      'Đang mưa': item.is_raining ? 'Có' : 'Không',
+      'Đất ướt': item.is_soil_wet ? 'Có' : 'Không'
+    })));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'LichSu');
+    XLSX.writeFile(wb, `LichSu_${activePlant.name || 'Cay'}_${format(new Date(), 'dd-MM-yyyy_HH-mm')}.xlsx`);
+  };
+
   if (!activePlant || fullHistoryData.length === 0) {
     return (
       <div style={{ padding: 120, textAlign: 'center', background: '#fff', borderRadius: 32, margin: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.08)' }}>
@@ -121,29 +178,126 @@ const History = ({ activePlant, fullHistoryData = [] }) => {
       <h2 style={{ textAlign: 'center', marginBottom: 16, color: '#1e293b', fontSize: '2rem', fontWeight: 'bold' }}>
         Lịch sử cảm biến – {activePlant.name}
       </h2>
-      <p style={{ textAlign: 'center', color: '#64748b', marginBottom: 32 }}>
-        Kéo sang trái/phải để xem dữ liệu cũ • {fullHistoryData.length} bản ghi
-      </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, marginBottom: 28 }}>
-        <div style={{ background: '#fff', borderRadius: 32, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.12)', cursor: 'grab' }} onMouseDown={handleDown}>
-          <canvas ref={canvasRefs.temp} width={720} height={360} style={{ width: '100%', height: '360px' }} />
-        </div>
-        <div style={{ background: '#fff', borderRadius: 32, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.12)', cursor: 'grab' }} onMouseDown={handleDown}>
-          <canvas ref={canvasRefs.hum} width={720} height={360} style={{ width: '100%', height: '360px' }} />
-        </div>
+      {/* Biểu đồ */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, marginBottom: 40 }}>
+        {Object.entries(canvasRefs).map(([key, ref]) => (
+          <div key={key} style={{ background: '#fff', borderRadius: 32, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.12)', cursor: 'grab' }} onMouseDown={handleDown}>
+            <canvas ref={ref} width={720} height={360} style={{ width: '100%', height: '360px' }} />
+          </div>
+        ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
-        <div style={{ background: '#fff', borderRadius: 32, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.12)', cursor: 'grab' }} onMouseDown={handleDown}>
-          <canvas ref={canvasRefs.soil} width={720} height={360} style={{ width: '100%', height: '360px' }} />
+      {/* BẢNG DỮ LIỆU – CHỈ HIỆN 10 DÒNG, CÒN LẠI CUỘN */}
+      <div style={{ background: '#fff', borderRadius: 32, padding: 32, boxShadow: '0 20px 60px rgba(0,0,0,0.12)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+          <h3 style={{ margin: 0, fontSize: '1.8rem', color: '#1e293b' }}>
+            Bảng dữ liệu ({tableData.length} bản ghi)
+          </h3>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <input
+              type="text"
+              placeholder="Tìm kiếm thời gian, nhiệt độ..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                padding: '12px 16px',
+                borderRadius: 12,
+                border: '2px solid #e2e8f0',
+                fontSize: '1rem',
+                minWidth: 280
+              }}
+            />
+            <button onClick={exportToExcel} style={{
+              padding: '12px 28px',
+              background: '#16a34a',
+              color: 'white',
+              border: 'none',
+              borderRadius: 16,
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '1.1rem'
+            }}>
+              Xuất Excel
+            </button>
+          </div>
         </div>
-        <div style={{ background: '#fff', borderRadius: 32, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.12)', cursor: 'grab' }} onMouseDown={handleDown}>
-          <canvas ref={canvasRefs.rain} width={720} height={360} style={{ width: '100%', height: '360px' }} />
+
+        {/* CHỖ CUỘN – CHỈ HIỆN 10 DÒNG */}
+        <div style={{
+          maxHeight: '520px',           // Chiều cao cố định ~10 dòng
+          overflowY: 'auto',
+          border: '1px solid #e2e8f0',
+          borderRadius: 16,
+          background: '#fff'
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 10 }}>
+              <tr>
+                {[
+                  { key: 'timestamp', label: 'Thời gian' },
+                  { key: 'temp', label: 'Nhiệt độ (°C)' },
+                  { key: 'hum', label: 'Độ ẩm KK (%)' },
+                  { key: 'soil_percent', label: 'Độ ẩm đất (%)' },
+                  { key: 'rain_percent', label: 'Mưa (%)' },
+                  { key: 'is_bright', label: 'Ánh sáng' },
+                  { key: 'is_raining', label: 'Đang mưa' },
+                  { key: 'is_soil_wet', label: 'Đất ướt' }
+                ].map(col => (
+                  <th
+                    key={col.key}
+                    onClick={() => requestSort(col.key)}
+                    style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 'bold',
+                      color: '#1e293b',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      background: '#f1f5f9'
+                    }}
+                  >
+                    {col.label}
+                    {sortConfig.key === col.key && (sortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableData.map((item, idx) => (
+                <tr key={idx} style={{
+                  background: idx % 2 === 0 ? '#fdfdfd' : '#fff',
+                  borderBottom: '1px solid #f3f4f6'
+                }}>
+                  <td style={cellStyle}>{format(new Date(item.timestamp), 'dd/MM/yyyy HH:mm:ss')}</td>
+                  <td style={cellStyle}>{item.temp?.toFixed(1) || '-'}</td>
+                  <td style={cellStyle}>{item.hum?.toFixed(1) || '-'}</td>
+                  <td style={{ ...cellStyle, fontWeight: item.soil_percent < 30 ? 'bold' : 'normal', color: item.soil_percent < 30 ? '#dc2626' : '#166534' }}>
+                    {item.soil_percent?.toFixed(1) || '-'}
+                  </td>
+                  <td style={cellStyle}>{item.rain_percent?.toFixed(1) || '-'}</td>
+                  <td style={cellStyle}>{item.is_bright ? 'Có' : 'Không'}</td>
+                  <td style={cellStyle}>{item.is_raining ? 'Có' : 'Không'}</td>
+                  <td style={cellStyle}>{item.is_soil_wet ? 'Có' : 'Không'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Hiển thị số lượng */}
+        <div style={{ marginTop: 16, textAlign: 'center', color: '#64748b', fontSize: '0.95rem' }}>
+          Đang hiển thị {tableData.length} bản ghi {search && `(đã lọc từ ${fullHistoryData.length})`}
         </div>
       </div>
     </div>
   );
+};
+
+const cellStyle = {
+  padding: '14px 12px',
+  color: '#334155',
+  fontSize: '0.98rem'
 };
 
 export default History;

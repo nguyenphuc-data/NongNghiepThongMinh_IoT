@@ -7,18 +7,26 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 require('dotenv').config();
-
+const fs = require('fs');
+const path = require('path');
 const mqtt = require('mqtt');
 const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
   clientId: 'smartgarden_server',
   reconnectPeriod: 1000
 });
-
+const PHOTOS_DIR = path.join(__dirname, 'public/photos');
+const ensureDir = () => {
+  if (!fs.existsSync(PHOTOS_DIR)) {
+    fs.mkdirSync(PHOTOS_DIR, { recursive: true });
+    console.log('Đã tạo thư mục photos');
+  }
+};
+ensureDir();
 const SensorData = require('./models/SensorData');
 const plantRoutes = require('./routes/plantRoutes');
 const authRoutes = require('./routes/auth');
 const plantZoneRoutes = require('./routes/plantZoneRoutes');
-
+const camRoutes = require('./routes/camRoutes');
 
 const PORT = process.env.PORT || 3000;
 const MAIN_DB_URI = process.env.MONGO_URI;
@@ -60,11 +68,13 @@ app.use((req, res, next) => {
   req.user = req.session.user || null;
   next();
 });
+app.use('/', express.static('public'));
 app.use('/api/pump', pumpRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/plants', plantRoutes);
 app.use('/api/plants-zone', plantZoneRoutes);
-
+app.use('/cam', camRoutes);
+app.use('/api/cam', camRoutes);
 const io = new Server(server, {
   cors: { origin: 'http://localhost:5173', credentials: true }
 });

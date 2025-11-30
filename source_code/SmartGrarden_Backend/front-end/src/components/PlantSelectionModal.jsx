@@ -28,7 +28,7 @@ const PlantSelectionModal = ({
 
   const [showAdvancedAdd, setShowAdvancedAdd] = useState(false);
   const [step, setStep] = useState('list'); // 'list' | 'add' | 'customize'
-
+  const [mode, setMode] = useState('manual');
   const [newPlantData, setNewPlantData] = useState({
     name: '',
     useAI: false,
@@ -38,6 +38,9 @@ const PlantSelectionModal = ({
   const [thresholds, setThresholds] = useState({});
   const [warnings, setWarnings] = useState({});
   const [submitting, setSubmitting] = useState(false);
+
+  const [aiCamResult, setAiCamResult] = useState(null);
+    const [aiCamLoading, setAiCamLoading] = useState(false);
   const resetForm = () => {
     setNewPlantData({
       name: '',
@@ -48,12 +51,12 @@ const PlantSelectionModal = ({
     setWarnings({});
     setStep('list');
     setShowAdvancedAdd(false);
+    setAiCamResult(null);
   };
 
   const isAdmin = localStorage.getItem('role') === 'admin';
 
   // ====== LẤY DANH SÁCH LOẠI CÂY ĐƯỢC PHÉP TRONG ZONE ======
-  // Ngay sau useMemo của allowedPlantTypes
 const allowedPlantTypes = useMemo(() => {
   if (!zoneData?.plantTypes || !Array.isArray(zoneData.plantTypes)) return [];
 
@@ -61,12 +64,12 @@ const allowedPlantTypes = useMemo(() => {
     if (typeof item === 'string') {
       return {
         _id: item,
-        displayName: item.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        displayName: item
       };
     }
 
     const id = item._id || item.code || item.id;
-    const name = item.name || (item.code ? item.code.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Không tên');
+    const name = item.name || item.code;
     return { _id: id, displayName: name };
   }).filter(Boolean);
 
@@ -298,139 +301,269 @@ const allowedPlantTypes = useMemo(() => {
   }
 
   // ====================== BƯỚC 2: FORM THÊM CÂY ======================
-  if (showAdvancedAdd && step === 'add') {
-    return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-        <div style={{ background: 'white', borderRadius: 36, width: '92vw', maxWidth: 660, padding: '48px 56px', boxShadow: '0 50px 140px rgba(prenominal 0,0,0,0.5)', position: 'relative' }}>
+ if (showAdvancedAdd && step === 'add') {
+  // Thêm state cho chế độ chọn loại cây
+   // 'manual' | 'history' | 'cam' | 'cam-result'
+
+  // Hàm xử lý AI CAM (chỉ call khi bấm nút chụp trong chế độ CAM)
+  const handleAiCam = async () => {
+    if (aiCamLoading) return;
+    setAiCamLoading(true);
+    setAiCamResult(null);
+
+    try {
+      const res = await axiosClient.get('/cam/snapshot');
+      if (!res.data.success) throw new Error("Không có dữ liệu AI");
+      console.log("=== KẾT QUẢ AI CAM ===");
+      console.log(res.data);
+      const aiData = res.data.data;
+      const predictedName = aiData.plant.toLowerCase().trim();
+
+      let matchedType = allowedPlantTypes.find(t =>
+        t.displayName.toLowerCase().includes(predictedName) ||
+        predictedName.includes(t.displayName.toLowerCase()) ||
+        t._id.toLowerCase().includes(predictedName.replace(/\s+/g, '_'))
+      );
+
+      const finalTypeId = matchedType?._id || allowedPlantTypes[0]?._id || '';
+
+      setNewPlantData({
+        useAI: true,
+        plantTypeId: finalTypeId
+      });
+
+      setAiCamResult({
+        ...aiData,
+        suggestedTypeName: matchedType?.displayName || allowedPlantTypes[0]?.displayName || 'Không xác định'
+      });
+
+      setMode('cam-result'); // Chuyển sang hiển thị kết quả sau khi chụp
+
+    } catch (err) {
+      alert("Không kết nối được với ESP32-CAM!\n\nĐảm bảo:\n• Python view_ble_cam.py đang chạy\n• ESP32-CAM đang gửi ảnh qua BLE");
+    } finally {
+      setAiCamLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
+      <div style={{ background: 'white', borderRadius: 36, width: '92vw', maxWidth: 680, padding: '48px 56px', boxShadow: '0 50px 140px rgba(0,0,0,0.5)', position: 'relative', maxHeight: '94vh', overflowY: 'auto' }}>
+        
+        {/* Nút đóng */}
+        <button
+          onClick={() => { resetForm(); onClose(); }}
+          style={{
+            position: 'absolute', top: 16, right: 16, width: 44, height: 44, borderRadius: '50%',
+            background: 'rgba(255,255,255,0.95)', border: '1px solid rgba(0,0,0,0.09)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.15)', backdropFilter: 'blur(12px)',
+            cursor: 'pointer', display: 'grid', placeItems: 'center',
+            fontWeight: '800', fontSize: '22px', color: '#666'
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(254,226,226,0.95)'; e.currentTarget.style.color = '#dc2626'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.95)'; e.currentTarget.style.color = '#666'; }}
+        >×</button>
+
+        <h2 style={{ textAlign: 'center', color: THEME.PRIMARY, fontSize: '2.4em', fontWeight: 900, marginBottom: 40 }}>Thêm Cây Mới</h2>
+
+        <input
+          type="text"
+          placeholder="Tên cây (VD: Cà chua vườn chính)"
+          value={newPlantData.name}
+          onChange={e => setNewPlantData(p => ({ ...p, name: e.target.value }))}
+          style={{ width: '100%', padding: '18px 24px', fontSize: '1.2em', borderRadius: 24, border: '3px solid #86efac', marginBottom: 32, background: '#ffffff', color: '#000000', fontWeight: 600 }}
+        />
+
+        <h3 style={{ margin: '10px 0 20px', fontSize: '1.5em', fontWeight: 'bold', color: THEME.PRIMARY }}>Chọn loại cây</h3>
+
+        {allowedPlantTypes.length === 0 ? (
+          <p style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', fontSize: '1.3em' }}>
+            Khu vực này chưa cấu hình loại cây nào!
+          </p>
+        ) : (
+          <>
+            {/* 3 NÚT CHỌN CHẾ ĐỘ – LUÔN HIỆN, NỔI BẬT KHI CHỌN */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 32 }}>
+              <label
+                style={{
+                  padding: 28,
+                  background: mode === 'manual' ? '#e8f7f3' : '#f9f9f9',
+                  border: `4px solid ${mode === 'manual' ? THEME.PRIMARY : '#ccc'}`,
+                  borderRadius: 28,
+                  cursor: 'pointer',
+                  textAlign: 'center'
+                }}
+                onClick={() => {
+                  setMode('manual');
+                  setNewPlantData(p => ({ ...p, useAI: false, plantTypeId: '' }));
+                  setAiCamResult(null);
+                }}
+              >
+                <div style={{ fontSize: '1.2em', marginBottom: 12, fontWeight: 'bold' }}>Chọn thủ công</div>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: mode === 'manual' ? 'white' : '#ccc', border: `6px solid ${mode === 'manual' ? THEME.PRIMARY : '#ccc'}`, margin: '0 auto' }} />
+              </label>
+
+              <label
+                style={{
+                  padding: 28,
+                  background: mode === 'history' ? '#e8f7f3' : '#f9f9f9',
+                  border: `4px solid ${mode === 'history' ? THEME.PRIMARY : '#ccc'}`,
+                  borderRadius: 28,
+                  cursor: latestAI ? 'pointer' : 'not-allowed',
+                  opacity: latestAI ? 1 : 0.5,
+                  textAlign: 'center'
+                }}
+                onClick={() => {
+                  if (latestAI) {
+                    setMode('history');
+                    setNewPlantData(p => ({ ...p, useAI: true, plantTypeId: getSuggestedTypeId() }));
+                    setAiCamResult(null);
+                  }
+                }}
+              >
+                <div style={{ fontSize: '1.2em', marginBottom: 12, fontWeight: 'bold' }}>AI (Lịch sử)</div>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: mode === 'history' ? 'white' : '#ccc', border: `6px solid ${mode === 'history' ? THEME.PRIMARY : '#ccc'}`, margin: '0 auto' }} />
+              </label>
+
+              <label
+                style={{
+                  padding: 28,
+                  background: mode.startsWith('cam') ? '#e8f7f3' : '#f9f9f9',
+                  border: `4px solid ${mode.startsWith('cam') ?  THEME.PRIMARY : '#ccc'}`,
+                  borderRadius: 28,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  position: 'relative'
+                }}
+                onClick={() => {
+                  setMode('cam');
+                  setNewPlantData(p => ({ ...p, useAI: true, plantTypeId: '' }));
+                  setAiCamResult(null);
+                }}
+              >
+                <div style={{ fontSize: '1.2em', marginBottom: 12, fontWeight: 'bold' }}>
+                  AI (CAM)
+                </div>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: mode.startsWith('cam') ? 'white' : '#ccc', border: `6px solid ${mode.startsWith('cam') ? '#10b981' : '#ccc'}`, margin: '0 auto' }} />
+                {mode === 'cam-result' && <div style={{ position: 'absolute', top: 8, right: 8, width: 16, height: 16, background: '#10b981', borderRadius: '50%', border: '3px solid white' }} />}
+              </label>
+            </div>
+
+            {/* NỘI DUNG RIÊNG CHO TỪNG CHẾ ĐỘ – CHỈ HIỆN 1 CÁI */}
+            {mode === 'manual' && (
+              <select
+                value={newPlantData.plantTypeId}
+                onChange={e => setNewPlantData(p => ({ ...p, plantTypeId: e.target.value }))}
+                style={{ width: '100%', padding: '18px', fontSize: '1.2em', borderRadius: 24, border: '3px solid #86efac', background: '#ffffff', color: '#000000', fontWeight: 600 }}
+              >
+                <option value="">-- Chọn loại cây --</option>
+                {allowedPlantTypes.map(t => (
+                  <option key={t._id} value={t._id}>{t.displayName}</option>
+                ))}
+              </select>
+            )}
+
+            {mode === 'history' && (
+              <div style={{ padding: 28, background: '#ecfdf5', border: '4px solid #10b981', borderRadius: 28, textAlign: 'center' }}>
+                <p style={{ margin: 0, fontSize: '1.6em', fontWeight: 'bold', color: THEME.PRIMARY }}>
+                  {allowedPlantTypes.find(t => t._id === newPlantData.plantTypeId)?.displayName || 'Đã chọn tự động'}
+                </p>
+                <p style={{ margin: '8px 0 0', color: '#059669' }}>Từ AI nhận diện lịch sử</p>
+              </div>
+            )}
+
+            {mode === 'cam' && (
+              <div style={{ textAlign: 'center', margin: '20px 0 30px', padding: 16, border: '3px dashed #10b981', borderRadius: 24 }}>
+                <p style={{ margin: '14px 0 20px', fontSize: '1.5em', fontWeight: 'bold' }}>
+                  Hướng camera vào cây và chụp
+                </p>
+                <button
+                  onClick={handleAiCam}
+                  disabled={aiCamLoading}
+                  style={{
+                    padding: '16px 48px',
+                    background: aiCamLoading ? '#ccc' : '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 30,
+                    fontWeight: 'bold',
+                    fontSize: '1.1em',
+                    cursor: aiCamLoading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {aiCamLoading ? 'Đang chụp...' : 'Chụp & Nhận diện'}
+                </button>
+              </div>
+            )}
+
+            {mode === 'cam-result' && aiCamResult && (
+              <div style={{ textAlign: 'center', margin: '20px 0 30px', padding: 16, border: '3px dashed #10b981', borderRadius: 24 }}>
+                <img 
+                  src={`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${aiCamResult.photo}`}
+                  alt="Cây vừa chụp" 
+                  style={{ maxWidth: '100%', maxHeight: 280, borderRadius: 18, boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} 
+                />
+                <p style={{ margin: '14px 0 0', fontSize: '1.5em', fontWeight: 'bold' }}>
+                  AI nhận diện: <span>{aiCamResult.plant}</span>
+                </p>
+                <p style={{ margin: '8px 0 20px', fontSize: '1.2em', color: '#059669' }}>
+                  Đã chọn: {aiCamResult.suggestedTypeName} ({(aiCamResult.confidence * 100).toFixed(1)}%)
+                </p>
+                <button
+                  onClick={() => setMode('cam')}
+                  style={{
+                    padding: '12px 32px',
+                    background: '#fee2e2',
+                    color: '#dc2626',
+                    border: 'none',
+                    borderRadius: 24,
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Chụp lại
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ display: 'flex', gap: 20, marginTop: 40, justifyContent: 'center' }}>
+          <button onClick={() => { setShowAdvancedAdd(false); setStep('list'); }} style={{ padding: '16px 40px', background: '#f0f0f0', borderRadius: 30, fontWeight: 'bold', color: '#333', border: 'none' }}>Hủy</button>
           <button
   onClick={() => {
-    resetForm();
-    onClose();
+    const name = newPlantData.name || '';
+    if (!name.trim()) {
+      return alert('Vui lòng nhập tên cây!');
+    }
+    if (!newPlantData.plantTypeId) {
+      return alert('Vui lòng chọn loại cây!\n\n• Dùng AI CAM để tự động chọn\n• Hoặc chuyển sang "Chọn thủ công"');
+    }
+    setStep('customize');
   }}
-  aria-label="Đóng"
   style={{
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    width: 44,
-    height: 44,
-    borderRadius: '50%',
-    background: 'rgba(255, 255, 255, 0.95)',
-    border: '1px solid rgba(0, 0, 0, 0.09)',
-    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    cursor: 'pointer',
-    zIndex: 1000,
-    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-    outline: 'none',
-    padding: 0,
-    margin: 0,
-
-    // BÍ KÍP CĂN GIỮA HOÀN HẢO 100%
-    display: 'grid',
-    placeItems: 'center',
-
-    // Font + chữ × chuẩn như Apple
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    fontWeight: '800',
-    fontSize: '22px',        // Chính xác 22px cho × nằm tâm tuyệt đối
-    lineHeight: 1,
-    color: '#666',
-    textAlign: 'center',
-    leadingTrim: 'both',     // Fix nhỏ cho một số trình duyệt
-    textEdge: 'cap',
+    padding: '16px 48px',
+    background: (newPlantData.name?.trim() && newPlantData.plantTypeId) ? THEME.PRIMARY : '#aaa',
+    color: 'white',
+    borderRadius: 30,
+    fontWeight: 'bold',
+    fontSize: '1.1em',
+    border: 'none',
+    opacity: (newPlantData.name?.trim() && newPlantData.plantTypeId) ? 1 : 0.6,
+    cursor: (newPlantData.name?.trim() && newPlantData.plantTypeId) ? 'pointer' : 'not-allowed',
+    transition: 'all 0.3s ease',
+    boxShadow: (newPlantData.name?.trim() && newPlantData.plantTypeId) 
+      ? '0 12px 30px rgba(0,89,63,0.4)' 
+      : 'none'
   }}
-  onMouseEnter={(e) => {
-    e.currentTarget.style.background = 'rgba(254, 226, 226, 0.95)';
-    e.currentTarget.style.color = '#dc2626';
-    e.currentTarget.style.transform = 'scale(1.1)';
-  }}
-  onMouseLeave={(e) => {
-    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
-    e.currentTarget.style.color = '#666';
-    e.currentTarget.style.transform = 'scale(1)';
-  }}
-  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.94)'}
-  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
+  disabled={!newPlantData.name?.trim() || !newPlantData.plantTypeId}
 >
-  ×
+  Tiếp theo
 </button>
-
-          <h2 style={{ textAlign: 'center', color: THEME.PRIMARY, fontSize: '2.4em', fontWeight: 900, marginBottom: 40 }}>Thêm Cây Mới</h2>
-
-          <input
-            type="text"
-            placeholder="Tên cây (VD: Cà chua vườn chính)"
-            value={newPlantData.name}
-            onChange={e => setNewPlantData(p => ({ ...p, name: e.target.value }))}
-            style={{ width: '100%', padding: '18px 24px', fontSize: '1.2em', borderRadius: 24, border: '3px solid #86efac', marginBottom: 32, background: '#ffffff', color: '#000000', fontWeight: 600 }}
-          />
-
-          <h3 style={{ margin: '10px 0 20px', fontSize: '1.5em', fontWeight: 'bold', color: THEME.PRIMARY }}>Chọn loại cây</h3>
-
-          {allowedPlantTypes.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', fontSize: '1.3em' }}>
-              Khu vực này chưa cấu hình loại cây nào!
-            </p>
-          ) : (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 }}>
-                <label style={{ padding: 28, background: newPlantData.useAI ? '#f9f9f9' : '#e8f7f3', border: `4px solid ${newPlantData.useAI ? '#ccc' : THEME.PRIMARY}`, borderRadius: 28, cursor: 'pointer', textAlign: 'center', color: '#000000' }}
-                  onClick={() => setNewPlantData(p => ({ ...p, useAI: false }))}>
-                  <div style={{ fontSize: '1.3em', marginBottom: 12, fontWeight: 'bold' }}>Chọn thủ công</div>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: newPlantData.useAI ? '#ccc' : 'white', border: `6px solid ${newPlantData.useAI ? '#ccc' : THEME.PRIMARY}`, margin: '0 auto' }} />
-                </label>
-
-                <label style={{ padding: 28, background: newPlantData.useAI ? '#e8f7f3' : '#f9f9f9', border: `4px solid ${newPlantData.useAI ? THEME.PRIMARY : '#ccc'}`, borderRadius: 28, cursor: latestAI ? 'pointer' : 'not-allowed', opacity: latestAI ? 1 : 0.5, color: '#000000' }}
-                  onClick={() => latestAI && setNewPlantData(p => ({ ...p, useAI: true, plantTypeId: getSuggestedTypeId() }))}>
-                  <div style={{ fontSize: '1.3em', marginBottom: 12, fontWeight: 'bold' }}>Dùng AI</div>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: newPlantData.useAI ? 'white' : '#ccc', border: `6px solid ${newPlantData.useAI ? THEME.PRIMARY : '#ccc'}`, margin: '0 auto' }} />
-                </label>
-              </div>
-
-              {!newPlantData.useAI ? (
-                <select
-                  value={newPlantData.plantTypeId}
-                  onChange={e => setNewPlantData(p => ({ ...p, plantTypeId: e.target.value }))}
-                  style={{ width: '100%', padding: '18px', fontSize: '1.2em', borderRadius: 24, border: '3px solid #86efac', background: '#ffffff', color: '#000000', fontWeight: 600 }}
-                >
-                  <option value="">-- Chọn loại cây --</option>
-                  {allowedPlantTypes.map(t => (
-                    <option key={t._id} value={t._id}>
-                      {t.displayName}   {/* ← hiển thị tên đẹp */}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div style={{ padding: 28, background: '#ecfdf5', border: '4px solid #10b981', borderRadius: 28, textAlign: 'center' }}>
-                  <p style={{ margin: 0, fontSize: '1.6em', fontWeight: 'bold', color: THEME.PRIMARY }}>
-                    {allowedPlantTypes.find(t => t._id === newPlantData.plantTypeId)?.name || latestAI?.predictedName || 'Đang chọn...'}
-                  </p>
-                  <p style={{ margin: '8px 0 0', color: '#059669' }}>Đã chọn tự động từ AI</p>
-                </div>
-              )}
-            </>
-          )}
-
-          <div style={{ display: 'flex', gap: 20, marginTop: 40, justifyContent: 'center' }}>
-            <button onClick={() => { setShowAdvancedAdd(false); setStep('list'); }} style={{ padding: '16px 40px', background: '#f0f0f0', borderRadius: 30, fontWeight: 'bold', color: '#333', border: 'none' }}>Hủy</button>
-            <button
-              onClick={() => {
-                if (!newPlantData.name.trim()) return alert('Nhập tên cây!');
-                if (!newPlantData.plantTypeId) return alert('Chọn loại cây!');
-                setStep('customize');
-              }}
-              style={{ padding: '16px 48px', background: THEME.PRIMARY, color: 'white', borderRadius: 30, fontWeight: 'bold', fontSize: '1.1em', border: 'none' }}
-              disabled={allowedPlantTypes.length === 0}
-            >
-              Tiếp theo →
-            </button>
-          </div>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   // ====================== BƯỚC 1: DANH SÁCH CÂY ======================
   return (
