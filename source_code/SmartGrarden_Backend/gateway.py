@@ -6,7 +6,7 @@ import time
 import paho.mqtt.client as mqtt
 
 # ==================== CẤU HÌNH ====================
-COM_PORT   = 'COM7'                    # SỬA THEO CỔNG CỦA BẠN
+COM_PORT   = 'COM5'                    # SỬA THEO CỔNG CỦA BẠN
 BAUD_RATE  = 115200
 DEVICE_KEY = 'esp32_vuonrau'
 

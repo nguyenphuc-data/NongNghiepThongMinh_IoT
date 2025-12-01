@@ -95,7 +95,7 @@ void sendData() {
   doc["hum"]  = currentHum;
   doc["rain_percent"] = constrain(map(analogRead(RAIN_AO), 4095, 1351, 0, 100), 0, 100);
   doc["is_raining"]   = digitalRead(RAIN_DO) == LOW;
-  doc["soil_percent"] = constrain(map(analogRead(SOIL_AO), 4095, 2600, 0, 100), 0, 100);
+  doc["soil_percent"] = constrain(map(analogRead(SOIL_AO), 4095, 1300, 0, 100), 0, 100);
   doc["is_soil_wet"]  = digitalRead(SOIL_DO) == LOW;
   doc["is_bright"]    = digitalRead(LIGHT_DO) == LOW;
   doc["pump"]         = pumpState ? "ON" : "OFF";

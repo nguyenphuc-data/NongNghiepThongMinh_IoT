@@ -27,6 +27,8 @@ router.get('/by-zone/:zoneId', async (req, res) => {
             deviceId: 1,
             datePlanted: 1,
             status: 1,
+            thresholds: 1,
+            warnings: 1,
             plant_type_id: {
               name: 1,
               thresholds: 1,

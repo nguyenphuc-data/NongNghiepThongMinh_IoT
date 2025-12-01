@@ -7,17 +7,26 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 require('dotenv').config();
-
+const fs = require('fs');
+const path = require('path');
 const mqtt = require('mqtt');
 const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
   clientId: 'smartgarden_server',
   reconnectPeriod: 1000
 });
-
+const PHOTOS_DIR = path.join(__dirname, 'public/photos');
+const ensureDir = () => {
+  if (!fs.existsSync(PHOTOS_DIR)) {
+    fs.mkdirSync(PHOTOS_DIR, { recursive: true });
+    console.log('Đã tạo thư mục photos');
+  }
+};
+ensureDir();
 const SensorData = require('./models/SensorData');
 const plantRoutes = require('./routes/plantRoutes');
 const authRoutes = require('./routes/auth');
 const plantZoneRoutes = require('./routes/plantZoneRoutes');
+const camRoutes = require('./routes/camRoutes');
 
 const PORT = process.env.PORT || 3000;
 const MAIN_DB_URI = process.env.MONGO_URI;
@@ -26,6 +35,7 @@ const ESP32_KEY = 'esp32_vuonrau';
 
 const app = express();
 const server = http.createServer(app);
+const pumpRoutes = require('./routes/pumpRoutes');
 
 // SESSION THAY THẾ TOKEN
 app.use(session({
@@ -46,9 +56,10 @@ app.use(session({
 
 app.use(cors({
   origin: 'http://localhost:5173',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],  // THÊM OPTIONS
+  allowedHeaders: ['Content-Type', 'Authorization'],     // cho phép header
   credentials: true   // cho phép gửi cookie
 }));
-
 app.use(express.json());
 
 // Gắn user từ session vào req
@@ -57,11 +68,13 @@ app.use((req, res, next) => {
   req.user = req.session.user || null;
   next();
 });
-
+app.use('/', express.static('public'));
+app.use('/api/pump', pumpRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/plants', plantRoutes);
 app.use('/api/plants-zone', plantZoneRoutes);
-
+app.use('/cam', camRoutes);
+app.use('/api/cam', camRoutes);
 const io = new Server(server, {
   cors: { origin: 'http://localhost:5173', credentials: true }
 });
@@ -94,14 +107,48 @@ let recognitionConn = null;
 // === SOCKET.IO + MQTT (giữ nguyên) ===
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
+
+  // === 1. Khi chọn cây → gửi 10 bản ghi gần nhất ===
   socket.on('set_active_plant', async (plantId) => {
     if (!mongoose.Types.ObjectId.isValid(plantId)) return;
+
     socket.leaveAll();
     socket.join(plantId);
     global.CURRENT_ACTIVE_PLANT_ID = plantId;
 
-    const history = await SensorData.find({ plant_id: plantId }).sort({ timestamp: -1 }).limit(10).lean();
-    socket.emit('initial_data', history.reverse());
+    try {
+      const history = await SensorData.find({ plant_id: plantId })
+        .sort({ timestamp: -1 })
+        .limit(10)
+        .lean()
+        .exec();
+
+      socket.emit('initial_data', history.reverse());
+    } catch (err) {
+      console.error('Lỗi lấy initial_data:', err);
+      socket.emit('initial_data', []);
+    }
+  });
+
+  // === 2. Khi yêu cầu toàn bộ lịch sử ===
+  socket.on('request_full_history', async (plantId) => {
+    if (!mongoose.Types.ObjectId.isValid(plantId)) {
+      socket.emit('full_history_data', []);
+      return;
+    }
+
+    try {
+      const fullHistory = await SensorData.find({ plant_id: plantId })
+        .sort({ timestamp: 1 })  // cũ nhất trước
+        .lean()
+        .exec();
+
+      socket.emit('full_history_data', fullHistory);
+      console.log(`Đã gửi toàn bộ lịch sử (${fullHistory.length} bản ghi) cho plant ${plantId}`);
+    } catch (err) {
+      console.error('Lỗi lấy full history:', err);
+      socket.emit('full_history_data', []);
+    }
   });
 });
 
@@ -137,9 +184,6 @@ mongoose.connect(MAIN_DB_URI).then(() => console.log('DB chính kết nối OK')
 
 server.listen(PORT, () => {
   console.log(`\nSMARTGARDEN SERVER CHẠY TẠI http://localhost:${PORT}`);
-  console.log('   ĐÃ CHUYỂN HOÀN TOÀN SANG SESSION');
-  console.log('   KHÔNG CÒN TOKEN, KHÔNG CÒN LỖI 401, KHÔNG CÒN INTERCEPTOR');
-  console.log('   ĐĂNG NHẬP 1 LẦN → DÙNG 30 NGÀY!\n');
 });
 
 const recognitionRoutes = require('./routes/recognitionRoutes');

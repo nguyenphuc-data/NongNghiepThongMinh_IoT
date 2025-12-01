@@ -27,6 +27,7 @@ function App() {
     // Socket & dữ liệu realtime
     const [latestData, setLatestData] = useState({});
     const [historyData, setHistoryData] = useState([]);
+    const [fullHistoryData, setFullHistoryData] = useState([]);
     const [status, setStatus] = useState('Connecting...');
     const socketRef = useRef(null);
 
@@ -38,8 +39,12 @@ function App() {
         socket.on("connect", () => {
             console.log("Socket connected!");
             setStatus('Connected');
+
             if (activePlant?._id) {
                 socket.emit("set_active_plant", activePlant._id);
+
+                console.log("Đang yêu cầu toàn bộ lịch sử cho cây:", activePlant._id);
+                socket.emit("request_full_history", activePlant._id);
             }
         });
 
@@ -51,6 +56,12 @@ function App() {
                 setHistoryData(data);
             }
         });
+        socket.on("full_history_data", (data) => {
+            console.log("NHẬN FULL HISTORY THÀNH CÔNG:", data.length, "bản ghi"); // BÂY GIỜ SẼ LOG!
+            console.log("Dữ liệu đầu tiên:", data[0]);
+            console.log("Dữ liệu cuối cùng:", data[data.length - 1]);
+            setFullHistoryData(data);
+        });
 
         socket.on("new_data", (data) => {
             setLatestData(data);
@@ -59,10 +70,11 @@ function App() {
                 if (newArr.length > 10) newArr.shift();
                 return newArr;
             });
+            setFullHistoryData(prev => [...prev, data]); // Vẫn thêm dữ liệu mới vào full
         });
 
         return () => socket.disconnect();
-    }, []);
+    }, [activePlant?._id]);
 
     useEffect(() => {
         if (socketRef.current?.connected && activePlant?._id) {
@@ -107,7 +119,7 @@ function App() {
 
     // ============== CHỌN CÂY ==============
     const selectActivePlantInApp = useCallback((plant) => {
-        console.log('Cây được chọn:', plant.name);
+        console.log('Cây được chọn:', plant);
         setActivePlant(plant);
         setActivePlantType(plant?.plant_type_id || null);
         setIsModalOpen(false);
@@ -159,7 +171,7 @@ function App() {
         );
     }
 
-    // ============== GIAO DIỆN CHÍNH – CÓ NÚT BACK NGAY CẠNH NÚT ĐỔI CÂY ==============
+    // ============== GIAO DIỆN CHÍNH ==============
     return (
         <>
             <header className="header">
@@ -255,14 +267,17 @@ function App() {
                     {currentPage === 'dashboard' ? (
                         <Dashboard
                             activePlant={activePlant}
-                            activePlantType={activePlantType}
                             selectActivePlant={selectActivePlantInApp}
                             latestData={latestData}
                             status={status}
                             historyData={historyData}
                         />
                     ) : (
-                        <History activePlant={activePlant} historyData={historyData} />
+                        <History
+                            activePlant={activePlant}
+                            historyData={historyData}
+                            fullHistoryData={fullHistoryData}
+                        />
                     )}
                 </main>
             </div>
