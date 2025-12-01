@@ -43,7 +43,6 @@ function App() {
             if (activePlant?._id) {
                 socket.emit("set_active_plant", activePlant._id);
 
-                // THÊM 2 DÒNG NÀY → TỰ ĐỘNG LẤY FULL HISTORY KHI CHỌN CÂY
                 console.log("Đang yêu cầu toàn bộ lịch sử cho cây:", activePlant._id);
                 socket.emit("request_full_history", activePlant._id);
             }
@@ -172,7 +171,7 @@ function App() {
         );
     }
 
-    // ============== GIAO DIỆN CHÍNH – CÓ NÚT BACK NGAY CẠNH NÚT ĐỔI CÂY ==============
+    // ============== GIAO DIỆN CHÍNH ==============
     return (
         <>
             <header className="header">

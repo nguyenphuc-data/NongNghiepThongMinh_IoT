@@ -1,4 +1,3 @@
-// src/components/pump/AIPump.jsx – ĐÃ XÓA HOÀN TOÀN THANH CHẠY, KHÔNG CÒN GÌ NỮA!
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
@@ -16,6 +15,9 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
   const intervalRef = useRef(null);
   const pumpTimeoutRef = useRef(null);
   const countdownRef = useRef(null);
+
+  const pumpingRef = useRef(false);   // TRACK TRẠNG THÁI BƠM – tránh stale state
+  const secondsRef = useRef(0);       // TRACK GIÂY ĐẾM NGƯỢC – tránh frozen countdown
 
   const autoWaterDuration = activePlant?.thresholds?.auto_water_duration || 10;
 
@@ -39,46 +41,57 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
       const needPump = data.need_pump ?? false;
       const probability = data.probability ?? 0;
 
-      setAiStatus({
+      setAiStatus(prev => ({
+        ...prev,
         probability,
         need_pump: needPump,
         loading: false,
         lastUpdate: new Date(),
         current_soil: data.current_soil ?? latestData?.soil_percent ?? 0,
-        message: needPump ? "CẦN TƯỚI NGAY!" : "KHÔNG CẦN TƯỚI",
-        isPumping: aiStatus.isPumping,
-        remainingSeconds: aiStatus.remainingSeconds
-      });
+        message: needPump ? "CẦN TƯỚI NGAY!" : "KHÔNG CẦN TƯỚI"
+      }));
 
-      if (needPump && !aiStatus.isPumping) {
+      // Nếu cần tưới & chưa bơm → kích hoạt
+      if (needPump && !pumpingRef.current) {
+
+        // BẬT BƠM
         await fetch('http://localhost:3000/api/control-pump', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ state: 'ON' })
         });
 
-        let secondsLeft = autoWaterDuration;
+        pumpingRef.current = true;
+        secondsRef.current = autoWaterDuration;
 
         setAiStatus(prev => ({
           ...prev,
           isPumping: true,
-          remainingSeconds: secondsLeft,
-          message: `Đang tưới... còn ${secondsLeft}s`
+          remainingSeconds: secondsRef.current,
+          message: `Đang tưới... còn ${secondsRef.current}s`
         }));
 
         console.log(`AI bật bơm ${autoWaterDuration} giây`);
 
+        // TẠO TIMER ĐẾM NGƯỢC
         countdownRef.current = setInterval(() => {
-          secondsLeft--;
-          if (secondsLeft >= 0) {
-            setAiStatus(prev => ({
-              ...prev,
-              remainingSeconds: secondsLeft,
-              message: secondsLeft > 0 ? `Đang tưới... còn ${secondsLeft}s` : "Đang tắt bơm..."
-            }));
+          secondsRef.current -= 1;
+
+          setAiStatus(prev => ({
+            ...prev,
+            remainingSeconds: secondsRef.current,
+            message:
+              secondsRef.current > 0
+                ? `Đang tưới... còn ${secondsRef.current}s`
+                : "Đang tắt bơm..."
+          }));
+
+          if (secondsRef.current <= 0) {
+            clearInterval(countdownRef.current);
           }
         }, 1000);
 
+        // TIMER TẮT BƠM
         pumpTimeoutRef.current = setTimeout(async () => {
           await fetch('http://localhost:3000/api/control-pump', {
             method: 'POST',
@@ -86,13 +99,17 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
             body: JSON.stringify({ state: 'OFF' })
           });
 
+          pumpingRef.current = false;
+          secondsRef.current = 0;
           clearInterval(countdownRef.current);
+
           setAiStatus(prev => ({
             ...prev,
             isPumping: false,
             remainingSeconds: 0,
             message: "Tưới xong – đang theo dõi tiếp"
           }));
+
           console.log("AI đã tắt bơm tự động");
         }, autoWaterDuration * 1000);
       }
@@ -102,11 +119,17 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
     }
   }, [isActive, activePlant?._id, latestData?.soil_percent, autoWaterDuration]);
 
+
+  // Handle ON/OFF AI
   useEffect(() => {
     if (!isActive) {
       clearInterval(intervalRef.current);
       clearTimeout(pumpTimeoutRef.current);
       clearInterval(countdownRef.current);
+
+      pumpingRef.current = false;
+      secondsRef.current = 0;
+
       setAiStatus({
         probability: 0,
         need_pump: false,
@@ -122,9 +145,7 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
 
     fetchAIDecision();
 
-    intervalRef.current = setInterval(() => {
-      fetchAIDecision();
-    }, 60_000);
+    intervalRef.current = setInterval(fetchAIDecision, 60_000);
 
     return () => {
       clearInterval(intervalRef.current);
@@ -133,10 +154,11 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
     };
   }, [isActive, fetchAIDecision]);
 
+
   return (
     <div style={{
       padding: "20px 16px",
-      background: isActive 
+      background: isActive
         ? (aiStatus.isPumping ? "linear-gradient(135deg, #d4f4dd, #a7f3d0)" : "linear-gradient(135deg, #fee2e2, #fecaca)")
         : "#f1f5f9",
       borderRadius: 20,
@@ -170,7 +192,6 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
         )}
       </h3>
 
-      {/* ĐÃ XÓA HOÀN TOÀN THANH CHẠY VÀ DÒNG "Xác suất cần tưới" */}
       <div style={{ margin: "16px 0" }}>
         <div style={{
           fontSize: "1.2rem",
@@ -181,9 +202,11 @@ const AIPump = ({ latestData, activePlant, isActive, onToggle }) => {
           alignItems: "center",
           justifyContent: "center"
         }}>
-          {aiStatus.loading ? "Đang suy nghĩ..." 
-           : aiStatus.isPumping ? `Đang tưới... còn ${aiStatus.remainingSeconds}s` 
-           : aiStatus.message}
+          {aiStatus.loading
+            ? "Đang suy nghĩ..."
+            : aiStatus.isPumping
+              ? `Đang tưới... còn ${aiStatus.remainingSeconds}s`
+              : aiStatus.message}
         </div>
       </div>
 
