@@ -4,7 +4,6 @@ import DataCard from './DataCard';
 import ManualPump from './pump/ManualPump';
 import ThresholdPump from './pump/ThresholdPump';
 import SchedulePump from './pump/SchedulePump';
-import AIPump from './pump/AIPump';
 
 const Dashboard = ({ latestData, status, activePlant }) => {
   const { temp, hum, soil_percent, pump, rain_percent = 0, is_bright } = latestData || {};
@@ -32,7 +31,6 @@ const Dashboard = ({ latestData, status, activePlant }) => {
     manual: "THỦ CÔNG",
     threshold: "TỰ ĐỘNG NGƯỠNG",
     schedule: "TỰ ĐỘNG LỊCH",
-    ai: "DỰ ĐOÁN AI",
     off: "TẮT TẤT CẢ"
   };
   const currentModeName = modeNames[activeMode];
@@ -106,8 +104,8 @@ const Dashboard = ({ latestData, status, activePlant }) => {
           Chế độ tưới hiện tại:
           <span style={{
             marginLeft: 16, padding: "12px 40px",
-            background: activeMode === 'manual' ? "#dcfce7" : activeMode === 'threshold' ? "#fed7aa" : activeMode === 'schedule' ? "#fef9c3" : activeMode === 'ai' ? "#e0f2fe" : "#f1f5f9",
-            color: activeMode === 'manual' ? "#166534" : activeMode === 'threshold' ? "#c2410c" : activeMode === 'schedule' ? "#92400e" : activeMode === 'ai' ? "#0369a1" : "#64748b",
+            background: activeMode === 'manual' ? "#dcfce7" : activeMode === 'threshold' ? "#fed7aa" : activeMode === 'schedule' ? "#fef9c3" : "#f1f5f9",
+            color: activeMode === 'manual' ? "#166534" : activeMode === 'threshold' ? "#c2410c" : activeMode === 'schedule' ? "#92400e" : "#64748b",
             fontWeight: "bold", fontSize: "1.55em", borderRadius: 50, display: "inline-block", minWidth: 260, boxShadow: "0 8px 25px rgba(0,0,0,0.12)"
           }}>
             {currentModeName}
@@ -119,7 +117,6 @@ const Dashboard = ({ latestData, status, activePlant }) => {
             { key: 'manual', label: "Thủ công", color: "#22c55e" },
             { key: 'threshold', label: "Tự động Ngưỡng", color: "#f97316" },
             { key: 'schedule', label: "Tự động Lịch", color: "#ca8a04" },
-            { key: 'ai', label: "Dự đoán", color: "#0ea5e9" },
           ].map(({ key, label, color }) => (
             <button key={key} onClick={() => setSelectedTab(key)}
               style={{
@@ -153,14 +150,6 @@ const Dashboard = ({ latestData, status, activePlant }) => {
             onToggle={() => setActiveMode(activeMode === 'schedule' ? 'off' : 'schedule')}
           />
         )}
-        {selectedTab === 'ai' && (
-  <AIPump
-    latestData={latestData}
-    activePlant={activePlant}
-    isActive={activeMode === 'ai'}
-    onToggle={() => setActiveMode(activeMode === 'ai' ? 'off' : 'ai')}
-  />
-)}
       </div>
     </div>
   );

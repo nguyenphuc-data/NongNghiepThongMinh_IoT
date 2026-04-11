@@ -93,8 +93,10 @@ function App() {
         setUser(userData.fullName || userData.username);
         setAvailableZones(zonesFromServer);
 
-        if (zonesFromServer.length === 1) {
-            setSelectedZone(zonesFromServer[0]);
+        if (zonesFromServer.length > 0) {
+            setSelectedZone(zonesFromServer[0] || { name: 'Mặc định', zoneId: 'default' });
+            // Tự động bật bảng chọn cây khi đăng nhập xong
+            setTimeout(() => setIsModalOpen(true), 200);
         }
     };
 
@@ -130,46 +132,7 @@ function App() {
         return <Login onLoginSuccess={handleLoginSuccess} />;
     }
 
-    if (!selectedZone) {
-        return (
-            <>
-                <header className="header" style={{
-                    backgroundColor: '#00593F',
-                    color: 'white',
-                    padding: '15px 30px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                }}>
-                    <h1 style={{ margin: 0 }}>SmartGarden</h1>
-                    <div>
-                        <span style={{ marginRight: '20px', fontWeight: 'bold' }}>
-                            Xin chào, {user}
-                        </span>
-                        <button onClick={handleLogout} style={{
-                            padding: '8px 16px',
-                            background: '#FF4444',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            cursor: 'pointer'
-                        }}>
-                            Đăng xuất
-                        </button>
-                    </div>
-                </header>
-
-                <ZoneSelection
-                    zones={availableZones}
-                    onSelectZone={(zone) => {
-                        setSelectedZone(zone);
-                        setActivePlant(null);
-                        setTimeout(() => setIsModalOpen(true), 100);
-                    }}
-                />
-            </>
-        );
-    }
+    // Đã xóa màn hình ZoneSelection ở đây theo yêu cầu
 
     // ============== GIAO DIỆN CHÍNH ==============
     return (
@@ -177,17 +140,6 @@ function App() {
             <header className="header">
                 <div className="app-title">
                     <span style={{ marginRight: '10px', fontSize: '1.5em' }}>SmartGarden</span>
-                    <div style={{
-                        display: 'inline-block',
-                        background: '#00593F',
-                        color: 'white',
-                        padding: '6px 14px',
-                        borderRadius: '20px',
-                        fontSize: '0.9em',
-                        marginRight: '10px'
-                    }}>
-                        Khu vực: {selectedZone.name}
-                    </div>
                     {activePlant && (
                         <div style={{
                             padding: '6px 14px',
@@ -204,27 +156,6 @@ function App() {
                 </div>
 
                 <div className="user-info">
-                    {/* NÚT BACK – ĐẶT NGAY TRƯỚC NÚT ĐỔI CÂY, THIẾT KẾ GIỐNG HỆT */}
-                    <button
-                        onClick={() => {
-                            setSelectedZone(null);
-                            setActivePlant(null);
-                            setIsModalOpen(false);
-                        }}
-                        style={{
-                            padding: '8px 15px',
-                            marginRight: '12px',
-                            backgroundColor: '#00593F',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            cursor: 'pointer',
-                            fontWeight: 'bold'
-                        }}
-                    >
-                        ← Back
-                    </button>
-
                     {/* Nút Đổi cây / Chọn cây – giữ nguyên */}
                     <button
                         onClick={() => setIsModalOpen(true)}

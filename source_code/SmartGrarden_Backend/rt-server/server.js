@@ -9,10 +9,21 @@ const cors = require('cors');
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const mqtt = require('mqtt');
-const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
-  clientId: 'smartgarden_server',
-  reconnectPeriod: 1000
+const aedes = require('aedes')();
+const net = require('net');
+const mqttServer = net.createServer(aedes.handle);
+const MQTT_PORT = 1883;
+
+mqttServer.listen(MQTT_PORT, function () {
+  console.log(`MQTT Broker đang chạy trên cổng ${MQTT_PORT}`);
+});
+
+aedes.on('client', function (client) {
+  console.log(`[MQTT] Client connected: ${client ? client.id : client}`);
+});
+
+aedes.on('clientDisconnect', function (client) {
+  console.log(`[MQTT] Client Disconnected: ${client ? client.id : client}`);
 });
 const PHOTOS_DIR = path.join(__dirname, 'public/photos');
 const ensureDir = () => {
@@ -26,11 +37,9 @@ const SensorData = require('./models/SensorData');
 const plantRoutes = require('./routes/plantRoutes');
 const authRoutes = require('./routes/auth');
 const plantZoneRoutes = require('./routes/plantZoneRoutes');
-const camRoutes = require('./routes/camRoutes');
 
 const PORT = process.env.PORT || 3000;
 const MAIN_DB_URI = process.env.MONGO_URI;
-const RECOG_DB_URI = 'mongodb+srv://pewpewls09_db_user:koFKZBj6jCrQ9mba@iot-sensors.jing9nf.mongodb.net/iot_sensors?appName=IoT-Sensors';
 const ESP32_KEY = 'esp32_vuonrau';
 
 const app = express();
@@ -73,36 +82,11 @@ app.use('/api/pump', pumpRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/plants', plantRoutes);
 app.use('/api/plants-zone', plantZoneRoutes);
-app.use('/cam', camRoutes);
-app.use('/api/cam', camRoutes);
 const io = new Server(server, {
   cors: { origin: 'http://localhost:5173', credentials: true }
 });
 
-// === DB AI + BROADCAST (giữ nguyên) ===
-let Recognition = null;
-let recognitionConn = null;
-
-(async () => {
-  try {
-    recognitionConn = await mongoose.createConnection(RECOG_DB_URI, { bufferCommands: false }).asPromise();
-    Recognition = recognitionConn.model('recognitions', new mongoose.Schema({}, { strict: false }), 'recognitions');
-    console.log('DB AI kết nối thành công!');
-
-    const broadcast = async () => {
-      if (!Recognition) return;
-      try {
-        const latest = await Recognition.findOne().sort({ timestamp: -1 }).lean();
-        io.emit('latest_recognition', latest || null);
-      } catch (e) { /* ignore */ }
-    };
-
-    recognitionConn.on('open', broadcast);
-    Recognition.watch().on('change', broadcast);
-  } catch (err) {
-    console.warn('DB AI không kết nối được → hệ thống vẫn chạy bình thường');
-  }
-})();
+// Đã xóa bỏ khối kết nối DB AI Camera
 
 // === SOCKET.IO + MQTT (giữ nguyên) ===
 io.on('connection', (socket) => {
@@ -152,32 +136,52 @@ io.on('connection', (socket) => {
   });
 });
 
-mqttClient.on('connect', () => {
-  mqttClient.subscribe(`smartgarden/${ESP32_KEY}/data`);
-});
+aedes.on('publish', async function (packet, client) {
+  if (packet.topic === 'smartgarden/telemetry') {
+    try {
+      const jsonStr = packet.payload.toString().trim();
+      if (!jsonStr) return;
 
-mqttClient.on('message', async (topic, message) => {
-  try {
-    const data = JSON.parse(message.toString());
-    if (data.device_key !== ESP32_KEY || !global.CURRENT_ACTIVE_PLANT_ID) return;
+      const data = JSON.parse(jsonStr);
+      data.device_key = ESP32_KEY;
 
-    const record = await SensorData.create({
-      ...data,
-      plant_id: global.CURRENT_ACTIVE_PLANT_ID,
-      timestamp: new Date(data.timestamp * 1000 || Date.now())
-    });
+      console.log(`[MQTT → Web] Nhiệt độ ${data.temp}°C, Ẩm ${data.hum}%, Bơm: ${data.pump}`);
 
-    io.to(global.CURRENT_ACTIVE_PLANT_ID).emit('new_data', record);
-    if (data.pump) io.emit('pump_controlled', { state: data.pump, source: 'esp32' });
-  } catch (err) { /* ignore */ }
+      if (!global.CURRENT_ACTIVE_PLANT_ID) return;
+
+      const record = await SensorData.create({
+        ...data,
+        plant_id: global.CURRENT_ACTIVE_PLANT_ID,
+        timestamp: new Date()
+      });
+
+      io.to(global.CURRENT_ACTIVE_PLANT_ID).emit('new_data', record);
+      if (data.pump) io.emit('pump_controlled', { state: data.pump, source: 'esp32' });
+    } catch (err) {
+      // ignore
+    }
+  }
 });
 
 app.post('/api/control-pump', (req, res) => {
   const { state } = req.body;
   if (!['ON', 'OFF'].includes(state)) return res.status(400).json({ error: 'Invalid' });
-  mqttClient.publish(`smartgarden/${ESP32_KEY}/cmd`, `PUMP:${state}`);
-  io.emit('pump_controlled', { state, source: 'web' });
-  res.json({ success: true });
+
+  const cmd = state;
+  aedes.publish({
+    topic: 'smartgarden/command/pump',
+    payload: Buffer.from(cmd),
+    qos: 0,
+    retain: false
+  }, (err) => {
+    if (err) {
+      console.error('Lỗi gửi lệnh qua MQTT: ', err.message);
+      return res.status(500).json({ error: 'Failed to send command to device' });
+    }
+    console.log(`[Web → MQTT] Đã gửi lệnh Tới ESP32: PUMP ${cmd}`);
+    io.emit('pump_controlled', { state, source: 'web' });
+    res.json({ success: true });
+  });
 });
 
 mongoose.connect(MAIN_DB_URI).then(() => console.log('DB chính kết nối OK'));

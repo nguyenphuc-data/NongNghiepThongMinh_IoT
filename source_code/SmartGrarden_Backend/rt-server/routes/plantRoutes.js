@@ -19,21 +19,23 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// GET: Lấy cây theo zone
+// GET: Lấy cây
 router.get('/', async (req, res) => {
   const { zoneId } = req.query;
-  if (!zoneId) return res.status(400).json({ message: 'Thiếu zoneId' });
 
-  // Nếu zoneId là string (ví dụ: "zone_vuon_chinh") thì tìm ObjectId thật
-  let realZoneId = zoneId;
-  if (!mongoose.Types.ObjectId.isValid(zoneId)) {
-    const zone = await mongoose.connection.db.collection('zones').findOne({ zoneId: zoneId });
-    if (!zone) return res.status(400).json({ message: 'Khu vực không tồn tại' });
-    realZoneId = zone._id;
+  let query = {};
+  if (zoneId && zoneId !== 'all') {
+    let realZoneId = zoneId;
+    if (!mongoose.Types.ObjectId.isValid(zoneId)) {
+      const zone = await mongoose.connection.db.collection('zones').findOne({ zoneId: zoneId });
+      if (!zone) return res.status(400).json({ message: 'Khu vực không tồn tại' });
+      realZoneId = zone._id;
+    }
+    query.zoneId = realZoneId;
   }
 
-  const plants = await Plant.find({ zoneId: realZoneId })
-    .populate('plant_type_id', 'name image_url code thresholds warnings')
+  const plants = await Plant.find(query)
+    .populate('typeInfo', 'name image_url code thresholds warnings')
     .lean();
 
   res.json(plants);
