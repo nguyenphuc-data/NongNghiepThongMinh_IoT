@@ -1,59 +1,37 @@
-// #include <Arduino.h>
+#include <Arduino.h>
 
-// // === SENSOR INCLUDES (GIỮ NGUYÊN) ===
-// #include "sensor/dht22.h"
-// #include "sensor/rain.h"
-// #include "sensor/soil.h"
-// #include "sensor/light.h"
+// Định nghĩa chân Relay theo sơ đồ bạn đã đấu nối
+#define RELAY_PIN 25 
 
-// // === PUMP INCLUDE (MỚI) ===
-// #include "sensor/pump.h" 
+void setup() {
+    // Khởi tạo Serial để theo dõi trên máy tính
+    Serial.begin(115200);
+    delay(1000); 
 
-// // === CẤU HÌNH (Đã loại bỏ WiFi/MQTT) ===
-// // Khong can setup WiFi/MQTT cho che do kiem tra nay
+    Serial.println("========================================");
+    Serial.println("   KIEM TRA QUY TRINH HOAT DONG RELAY   ");
+    Serial.println("========================================");
 
-// // === KHAI BÁO HÀM (Đã loại bỏ WiFi/MQTT) ===
-// // void setupWiFi();
-// // void reconnectMQTT();
-// // void publishData(...); 
+    // Cấu hình chân D25 là đầu ra
+    pinMode(RELAY_PIN, OUTPUT);
 
-// void setup() {
-//     Serial.begin(115200);
-//     delay(1000);
-//     Serial.println("=== ESP32 → KIEM TRA SENSOR VA CHU KY BOM (5s ON/2s OFF) ===");
-    
-//     // Khởi tạo tất cả module
-//     dht.begin();
-//     setupRain();
-//     setupSoil();
-//     setupLight();
-//     setupPump(); // <--- KHỞI TẠO BƠM
-// }
+    // Trạng thái ban đầu: Tắt
+    digitalWrite(RELAY_PIN, HIGH); 
+    Serial.println("Setup xong: Mac dinh Relay TAT (HIGH)");
+}
 
-// void loop() {
-    
-//     // --- 1. ĐỌC VÀ HIỂN THỊ DỮ LIỆU CẢM BIẾN ---
-//     float h, t;
-//     if (!readDHT22(h, t)) { h = t = -999; }
+void loop() {
+    // --- THU NGHIEM MUC THAP (LOW) ---
+    Serial.println("Dang kich muc: LOW...");
+    digitalWrite(RELAY_PIN, LOW); 
+    Serial.println("-> Kiem tra den LED va tieng 'Tach'");
+    delay(5000); // Giữ trong 5 giây
 
-//     int rainP = readRainPercent();
-//     bool raining = isRaining();
-//     int soilP = readSoilPercent();
-//     bool soilWet = isSoilWet();
-//     bool bright = isBright();
+    // --- THU NGHIEM MUC CAO (HIGH) ---
+    Serial.println("Dang kich muc: HIGH...");
+    digitalWrite(RELAY_PIN, HIGH);
+    Serial.println("-> Kiem tra den LED va tieng 'Tach'");
+    delay(5000); // Giữ trong 5 giây
 
-//     Serial.println("------------------------------------");
-//     printDHT22(h, t);
-//     printRain(rainP, raining);
-//     printSoil(soilP, soilWet);
-//     printLight(bright);
-    
-//     // --- 2. LOGIC CHẠY BƠM LUÂN PHIÊN (NON-BLOCKING) ---
-//     // Hàm này sẽ tự kiểm tra thời gian và chuyển trạng thái Bật/Tắt
-//     runPumpCycle(); 
-    
-//     Serial.println("------------------------------------");
-
-//     // Chỉ đọc cảm biến và hiển thị mỗi 500ms để không quá tải Serial
-//     delay(500); 
-// }
+    Serial.println("----------------------------------------");
+}

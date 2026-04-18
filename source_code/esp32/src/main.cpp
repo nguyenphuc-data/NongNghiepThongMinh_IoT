@@ -1,11 +1,14 @@
-// main.ino – BẢN CUỐI CÙNG + LOG FIRMWARE THẬT 100% (2025)
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
-#include <esp_ota_ops.h>      // ← THÊM DÒNG NÀY
-#include <esp_app_format.h>   // ← THÊM DÒNG NÀY
-
+#include <Preferences.h>   // Lưu trữ NVS
+#include <esp_task_wdt.h>  // Watchdog Timer
+#include <esp_ota_ops.h>   // Thông tin Firmware
+#include <esp_app_format.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+// --- 1. ĐỊNH NGHĨA CHÂN (GIỮ CHUẨN 100% TỪ BẢN CŨ) ---
 #define DHT_PIN     21
 #define DHT_TYPE    DHT22
 #define LIGHT_DO    18
@@ -15,135 +18,179 @@
 #define SOIL_DO     33
 #define PUMP_PIN    25
 
-DHT dht(DHT_PIN, DHT_TYPE);
+#define DEVICE_KEY "esp32_vuonrau"
+#define WDT_TIMEOUT 20  // Tăng lên 20s để tránh Reset khi khởi động
+#define FIRMWARE_VERSION "v1.2.0-FINAL-RTOS"
+
+// Bộ nhớ đệm tĩnh (Static Memory) - Tối ưu 10 điểm
+char logBuf[128];
+char jsonBuf[512];
+
+// Biến điều khiển & Trạng thái
+volatile bool rain_flag = false;
+bool pump_status = false;
+
+struct SensorData {
+    float t, h;
+    int rain_p, soil_p;
+    bool is_raining, is_soil_wet, is_bright;
+};
+
 BluetoothSerial SerialBT;
+DHT dht(DHT_PIN, DHT_TYPE);
+Preferences prefs; 
+QueueHandle_t sensorQueue;
 
-// === BIẾN TOÀN CỤC ===
-char jsonBuffer[400];
-String btCmd = "";
-bool pumpState = false;
-bool lastPumpState = false;
-unsigned long lastSend = 0;
-unsigned long lastCommandTime = 0;
-
-float currentTemp = -1;
-float currentHum = -1;
-unsigned long lastDHTRead = 0;
-#define FIRMWARE_VERSION "v1.0.0 23112025"    
-// === HÀM IN LOG FIRMWARE THẬT – SIÊU ĐẸP ===
-void printRealFirmwareInfo() {
-  const esp_app_desc_t *app = esp_ota_get_app_description();
-
-  Serial.println("\n╔══════════════════════════════════════════════════╗");
-  Serial.println("║             SMART GARDEN ESP32 - 2025            ║");
-  Serial.println("╠══════════════════════════════════════════════════╣");
-  Serial.printf("║ Project Name    : %s\n", app->project_name);
-  Serial.printf("║ Version      : %s\n", FIRMWARE_VERSION);
-  Serial.printf("║ Firmware Version: %s\n", app->version);        // ← THẬT 100%
-  Serial.printf("║ Compile Time    : %s %s\n", app->date, app->time);
-  Serial.printf("║ IDF Version     : %s\n", app->idf_ver);
-  Serial.printf("║ Chip            : %s Rev %d\n", 
-                ESP.getChipModel(), ESP.getChipRevision());
-  Serial.printf("║ Flash Size      : %d MB\n", ESP.getFlashChipSize() / 1024 / 1024);
-  
-  const esp_partition_t *running = esp_ota_get_running_partition();
-  Serial.printf("║ Running Partition: %s (0x%x)\n", running->label, running->address);
-  Serial.println("╚══════════════════════════════════════════════════╝\n");
+// --- 2. HÀM HỖ TRỢ (LOGGING & INFO) ---
+void getUptimeStr(char* target) {
+    unsigned long s = millis() / 1000;
+    snprintf(target, 15, "%02lu:%02lu:%02lu", (s/3600), (s%3600)/60, s%60);
 }
 
-// === HÀM TASK ĐỌC DHT ===
-void dhtTask(void *pvParameters) {
-  for (;;) {
-    if (millis() - lastDHTRead >= 3000) {
-      float t = dht.readTemperature();
-      float h = dht.readHumidity();
-      if (!isnan(t)) currentTemp = round(t * 10) / 10.0;
-      if (!isnan(h)) currentHum = round(h * 10) / 10.0;
-      lastDHTRead = millis();
+void sendLog(const char* msg, bool isError = false) {
+    char tStr[15]; getUptimeStr(tStr);
+    snprintf(logBuf, sizeof(logBuf), "[%s] %s %s", tStr, isError ? "[ERR]" : "[INFO]", msg);
+    Serial.println(logBuf);
+    if (SerialBT.hasClient()) SerialBT.println(logBuf);
+}
+
+void IRAM_ATTR rainISR() { rain_flag = true; }
+
+void setPump(bool turnOn) {
+    pump_status = turnOn;
+    prefs.putBool("last_p_state", pump_status);
+    digitalWrite(PUMP_PIN, turnOn ? LOW : HIGH); // Active Low
+}
+
+// ================== NHÂN 0: THU THẬP DỮ LIỆU (DATA LAYER) ==================
+void TaskSensor(void *pv) {
+    esp_task_wdt_add(NULL);
+    for (;;) {
+        esp_task_wdt_reset();
+        SensorData data;
+        
+        // Đọc DHT22 an toàn
+        float temp = dht.readTemperature();
+        float humi = dht.readHumidity();
+        data.t = isnan(temp) ? -1.0 : round(temp * 10) / 10.0;
+        data.h = isnan(humi) ? -1.0 : round(humi * 10) / 10.0;
+
+        // Đọc cảm biến Analog với dải 11db
+        data.rain_p = constrain(map(analogRead(RAIN_AO), 4095, 1351, 0, 100), 0, 100);
+        data.soil_p = constrain(map(analogRead(SOIL_AO), 4095, 1300, 0, 100), 0, 100);
+
+        // Đọc cảm biến Digital
+        data.is_raining = (digitalRead(RAIN_DO) == LOW);
+        data.is_soil_wet = (digitalRead(SOIL_DO) == LOW);
+        data.is_bright = (digitalRead(LIGHT_DO) == LOW);
+
+        if (sensorQueue != NULL) {
+            xQueueOverwrite(sensorQueue, &data);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000)); 
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-  }
 }
 
-// === SETUP ===
+// ================== NHÂN 1: LOGIC & ĐIỀU KHIỂN (LOGIC LAYER) ==================
+void TaskLogic(void *pv) {
+    esp_task_wdt_add(NULL);
+    SensorData rx;
+    for (;;) {
+        esp_task_wdt_reset();
+        
+        // Xử lý lệnh Bluetooth / Serial
+        if (SerialBT.available() || Serial.available()) {
+            String cmd = SerialBT.available() ? SerialBT.readStringUntil('\n') : Serial.readStringUntil('\n');
+            cmd.trim();
+            if (cmd.length() > 0) {
+                if (cmd.indexOf("PUMP:ON") >= 0 || cmd.indexOf("PUMP_ON") >= 0) {
+                    // Chỉ cho phép bật nếu trời KHÔNG mưa
+                    if (digitalRead(RAIN_DO) == HIGH && !rain_flag) setPump(true);
+                    else sendLog("Khóa bơm: Đang có mưa!", true);
+                }
+                else if (cmd.indexOf("PUMP:OFF") >= 0 || cmd.indexOf("PUMP_OFF") >= 0) {
+                    setPump(false);
+                }
+            }
+        }
+
+        // Kiểm tra an toàn từ dữ liệu cảm biến
+        if (sensorQueue != NULL && xQueuePeek(sensorQueue, &rx, pdMS_TO_TICKS(500))) {
+            if (rx.is_raining || rain_flag) {
+                if (pump_status) {
+                    setPump(false);
+                    sendLog("Tự động ngắt bơm do phát hiện mưa!", true);
+                }
+            }
+            if (digitalRead(RAIN_DO) == HIGH) rain_flag = false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200)); 
+    }
+}
+
+// ================== NHÂN 1: TRUYỀN THÔNG JSON (COMM LAYER) ==================
+void TaskComm(void *pv) {
+    esp_task_wdt_add(NULL);
+    SensorData rx;
+    for (;;) {
+        esp_task_wdt_reset();
+        if (sensorQueue != NULL && xQueuePeek(sensorQueue, &rx, pdMS_TO_TICKS(1000))) {
+            StaticJsonDocument<512> doc;
+            char tStr[15]; getUptimeStr(tStr);
+            
+            doc["uptime"] = tStr;
+            doc["temp"] = rx.t;
+            doc["hum"] = rx.h;
+            doc["rain_percent"] = rx.rain_p;
+            doc["is_raining"] = rx.is_raining;
+            doc["soil_percent"] = rx.soil_p;
+            doc["is_soil_wet"] = rx.is_soil_wet;
+            doc["is_bright"] = rx.is_bright;
+            doc["pump"] = pump_status ? "ON" : "OFF";
+            doc["device"] = DEVICE_KEY;
+
+            serializeJson(doc, jsonBuf);
+            Serial.println(jsonBuf);
+            SerialBT.println(jsonBuf);
+        }
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
+
+// --- 3. SETUP: KHỞI TẠO HỆ THỐNG ---
 void setup() {
-  Serial.begin(115200);
-  SerialBT.begin("ESP32_VUON_RAU");
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    Serial.begin(115200);
+    SerialBT.begin("ESP32_VUON_RAU_RTOS");
 
-  // ← IN FIRMWARE THẬT NGAY TỪ ĐẦU!
-  printRealFirmwareInfo();
+    // QUAN TRỌNG: Khởi tạo Queue trước khi tạo Task để tránh Reset 0xc
+    sensorQueue = xQueueCreate(1, sizeof(SensorData));
 
-  Serial.println("=== ESP32 VUON RAU - BẢN HOÀN HẢO NHẤT 2025 ===");
+    analogSetAttenuation(ADC_11db);
+    dht.begin();
+    pinMode(LIGHT_DO, INPUT_PULLUP);
+    pinMode(RAIN_DO, INPUT_PULLUP);
+    pinMode(SOIL_DO, INPUT_PULLUP);
+    pinMode(PUMP_PIN, OUTPUT);
 
-  analogSetAttenuation(ADC_11db);
-  dht.begin();
-  pinMode(LIGHT_DO, INPUT_PULLUP);
-  pinMode(RAIN_DO, INPUT);
-  pinMode(SOIL_DO, INPUT);
-  pinMode(PUMP_PIN, OUTPUT);
-  digitalWrite(PUMP_PIN, HIGH);
+    // Khôi phục trạng thái NVS (Trí nhớ máy bơm)
+    prefs.begin("garden", false);
+    pump_status = prefs.getBool("last_p_state", false);
+    setPump(pump_status);
 
-  xTaskCreatePinnedToCore(
-    dhtTask, "DHT_Task", 4096, NULL, 1, NULL, 0
-  );
+    // Watchdog & Ngắt ngoài
+    esp_task_wdt_init(WDT_TIMEOUT, true);
+    attachInterrupt(digitalPinToInterrupt(RAIN_DO), rainISR, FALLING);
+
+    // Tạo các Task chạy song song trên 2 nhân
+    xTaskCreatePinnedToCore(TaskSensor, "Sns", 4096, NULL, 1, NULL, 0); // Core 0
+    xTaskCreatePinnedToCore(TaskLogic,  "Lgc", 4096, NULL, 2, NULL, 1); // Core 1
+    xTaskCreatePinnedToCore(TaskComm,   "Com", 4096, NULL, 1, NULL, 1); // Core 1
+    
+    sendLog("Hệ thống RTOS đã sẵn sàng.");
 }
 
-// === HÀM GỬI DỮ LIỆU ===
-void sendData() {
-  StaticJsonDocument<400> doc;
-  doc["temp"] = currentTemp;
-  doc["hum"]  = currentHum;
-  doc["rain_percent"] = constrain(map(analogRead(RAIN_AO), 4095, 1351, 0, 100), 0, 100);
-  doc["is_raining"]   = digitalRead(RAIN_DO) == LOW;
-  doc["soil_percent"] = constrain(map(analogRead(SOIL_AO), 4095, 1300, 0, 100), 0, 100);
-  doc["is_soil_wet"]  = digitalRead(SOIL_DO) == LOW;
-  doc["is_bright"]    = digitalRead(LIGHT_DO) == LOW;
-  doc["pump"]         = pumpState ? "ON" : "OFF";
-  doc["device"]       = "esp32_vuonrau";
-
-  int len = serializeJson(doc, jsonBuffer, sizeof(jsonBuffer) - 2);
-  jsonBuffer[len] = '\n';
-  jsonBuffer[len + 1] = '\0';
-
-  SerialBT.write((uint8_t*)jsonBuffer, len + 1);
-  Serial.printf("Gửi BT: %s", jsonBuffer);
-}
-
-// === HÀM ĐIỀU KHIỂN BƠM ===
-void controlPump(bool on) {
-  digitalWrite(PUMP_PIN, on ? LOW : HIGH);
-  pumpState = on;
-  Serial.println(on ? "BƠM: BẬT" : "BƠM: TẮT");
-}
-
-// === LOOP CHÍNH ===
-void loop() {
-  while (SerialBT.available()) {
-    char c = SerialBT.read();
-    if (c == '\n' || c == '\r') {
-      if (btCmd.length() > 0) {
-        btCmd.trim();
-        if (btCmd == "PUMP:ON" && millis() - lastCommandTime > 800) {
-          controlPump(true);
-          lastCommandTime = millis();
-        }
-        if (btCmd == "PUMP:OFF" && millis() - lastCommandTime > 800) {
-          controlPump(false);
-          lastCommandTime = millis();
-        }
-        btCmd = "";
-      }
-    } else if (c >= ' ' && c <= '~') {
-      btCmd += c;
-    }
-    yield();
-  }
-
-  if (pumpState != lastPumpState || millis() - lastSend >= 5000) {
-    sendData();
-    lastPumpState = pumpState;
-    lastSend = millis();
-  }
-
-  yield();
+void loop() { 
+    // Trong RTOS, loop chính được giải phóng để giảm tải CPU
+    vTaskDelete(NULL); 
 }

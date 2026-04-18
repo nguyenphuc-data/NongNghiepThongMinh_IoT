@@ -9,22 +9,27 @@ const cors = require('cors');
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const aedes = require('aedes')();
-const net = require('net');
-const mqttServer = net.createServer(aedes.handle);
-const MQTT_PORT = 1883;
+const { SerialPort } = require('serialport');
+const { ReadlineParser } = require('@serialport/parser-readline');
 
-mqttServer.listen(MQTT_PORT, function () {
-  console.log(`MQTT Broker đang chạy trên cổng ${MQTT_PORT}`);
+const SERIAL_PORT_NAME = process.env.SERIAL_PORT || 'COM3';
+
+const serialPort = new SerialPort({
+  path: SERIAL_PORT_NAME,
+  baudRate: 115200,
+  autoOpen: true
 });
 
-aedes.on('client', function (client) {
-  console.log(`[MQTT] Client connected: ${client ? client.id : client}`);
+serialPort.on('error', (err) => {
+  console.error(`[Serial] Lỗi kết nối COM port:`, err.message);
+  console.log(`* Gợi ý: Hãy cấu hình SERIAL_PORT=COM... trong file .env cho đúng với thực tế.`);
 });
 
-aedes.on('clientDisconnect', function (client) {
-  console.log(`[MQTT] Client Disconnected: ${client ? client.id : client}`);
+serialPort.on('open', () => {
+  console.log(`[Serial] Đã mở thành công cổng: ${SERIAL_PORT_NAME}`);
 });
+
+const parser = serialPort.pipe(new ReadlineParser({ delimiter: '\n' }));
 const PHOTOS_DIR = path.join(__dirname, 'public/photos');
 const ensureDir = () => {
   if (!fs.existsSync(PHOTOS_DIR)) {
@@ -44,8 +49,6 @@ const ESP32_KEY = 'esp32_vuonrau';
 
 const app = express();
 const server = http.createServer(app);
-const pumpRoutes = require('./routes/pumpRoutes');
-
 // SESSION THAY THẾ TOKEN
 app.use(session({
   secret: 'smartgarden_super_secret_2025',
@@ -78,7 +81,6 @@ app.use((req, res, next) => {
   next();
 });
 app.use('/', express.static('public'));
-app.use('/api/pump', pumpRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/plants', plantRoutes);
 app.use('/api/plants-zone', plantZoneRoutes);
@@ -136,30 +138,37 @@ io.on('connection', (socket) => {
   });
 });
 
-aedes.on('publish', async function (packet, client) {
-  if (packet.topic === 'smartgarden/telemetry') {
-    try {
-      const jsonStr = packet.payload.toString().trim();
-      if (!jsonStr) return;
+parser.on('data', async function (line) {
+  try {
+    const jsonStr = line.trim();
+    if (!jsonStr) return;
 
-      const data = JSON.parse(jsonStr);
-      data.device_key = ESP32_KEY;
+    // Log raw data để debug
+    console.log(`[Raw Serial Data] ${jsonStr}`);
 
-      console.log(`[MQTT → Web] Nhiệt độ ${data.temp}°C, Ẩm ${data.hum}%, Bơm: ${data.pump}`);
-
-      if (!global.CURRENT_ACTIVE_PLANT_ID) return;
-
-      const record = await SensorData.create({
-        ...data,
-        plant_id: global.CURRENT_ACTIVE_PLANT_ID,
-        timestamp: new Date()
-      });
-
-      io.to(global.CURRENT_ACTIVE_PLANT_ID).emit('new_data', record);
-      if (data.pump) io.emit('pump_controlled', { state: data.pump, source: 'esp32' });
-    } catch (err) {
-      // ignore
+    // Thử tách chuỗi JSON nếu nó bị dính text "Gửi BT: " do cắm nhầm cáp USB
+    let pureJson = jsonStr;
+    if (jsonStr.includes('Gửi BT: ')) {
+      pureJson = jsonStr.split('Gửi BT: ')[1];
     }
+
+    const data = JSON.parse(pureJson);
+    data.device_key = ESP32_KEY;
+
+    console.log(`[Parsed] Nhiệt độ ${data.temp}°C, Ẩm ${data.hum}%, Bơm: ${data.pump}`);
+
+    if (!global.CURRENT_ACTIVE_PLANT_ID) return;
+
+    const record = await SensorData.create({
+      ...data,
+      plant_id: global.CURRENT_ACTIVE_PLANT_ID,
+      timestamp: new Date()
+    });
+
+    io.to(global.CURRENT_ACTIVE_PLANT_ID).emit('new_data', record);
+    if (data.pump) io.emit('pump_controlled', { state: data.pump, source: 'esp32' });
+  } catch (err) {
+    console.error('[Lỗi Data] Lưu Database hoặc Parse thất bại:', err.message);
   }
 });
 
@@ -167,18 +176,13 @@ app.post('/api/control-pump', (req, res) => {
   const { state } = req.body;
   if (!['ON', 'OFF'].includes(state)) return res.status(400).json({ error: 'Invalid' });
 
-  const cmd = state;
-  aedes.publish({
-    topic: 'smartgarden/command/pump',
-    payload: Buffer.from(cmd),
-    qos: 0,
-    retain: false
-  }, (err) => {
+  const cmd = `PUMP:${state}\n`;
+  serialPort.write(cmd, (err) => {
     if (err) {
-      console.error('Lỗi gửi lệnh qua MQTT: ', err.message);
+      console.error('Lỗi gửi lệnh qua Serial: ', err.message);
       return res.status(500).json({ error: 'Failed to send command to device' });
     }
-    console.log(`[Web → MQTT] Đã gửi lệnh Tới ESP32: PUMP ${cmd}`);
+    console.log(`[Web → Serial] Đã gửi lệnh Tới ESP32: PUMP:${state}`);
     io.emit('pump_controlled', { state, source: 'web' });
     res.json({ success: true });
   });
@@ -190,6 +194,3 @@ server.listen(PORT, () => {
   console.log(`\nSMARTGARDEN SERVER CHẠY TẠI http://localhost:${PORT}`);
 });
 
-const recognitionRoutes = require('./routes/recognitionRoutes');
-
-app.use('/api/recognitions', recognitionRoutes);
