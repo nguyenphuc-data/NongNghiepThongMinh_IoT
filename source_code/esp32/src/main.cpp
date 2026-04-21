@@ -2,13 +2,11 @@
 #include <BluetoothSerial.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
-#include <Preferences.h>   // Lưu trữ NVS
-#include <esp_task_wdt.h>  // Watchdog Timer
-#include <esp_ota_ops.h>   // Thông tin Firmware
-#include <esp_app_format.h>
+#include <Preferences.h>   
+#include <esp_task_wdt.h>  
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
-// --- 1. ĐỊNH NGHĨA CHÂN (GIỮ CHUẨN 100% TỪ BẢN CŨ) ---
+//  ĐỊNH NGHĨA CHÂN  ---
 #define DHT_PIN     21
 #define DHT_TYPE    DHT22
 #define LIGHT_DO    18
@@ -19,10 +17,10 @@
 #define PUMP_PIN    25
 
 #define DEVICE_KEY "esp32_vuonrau"
-#define WDT_TIMEOUT 20  // Tăng lên 20s để tránh Reset khi khởi động
+#define WDT_TIMEOUT 20  
 #define FIRMWARE_VERSION "v1.2.0-FINAL-RTOS"
 
-// Bộ nhớ đệm tĩnh (Static Memory) - Tối ưu 10 điểm
+// Bộ nhớ đệm tĩnh
 char logBuf[128];
 char jsonBuf[512];
 
@@ -41,7 +39,7 @@ DHT dht(DHT_PIN, DHT_TYPE);
 Preferences prefs; 
 QueueHandle_t sensorQueue;
 
-// --- 2. HÀM HỖ TRỢ (LOGGING & INFO) ---
+// ---HÀM HỖ TRỢ (LOGGING & INFO) ---
 void getUptimeStr(char* target) {
     unsigned long s = millis() / 1000;
     snprintf(target, 15, "%02lu:%02lu:%02lu", (s/3600), (s%3600)/60, s%60);
@@ -54,7 +52,9 @@ void sendLog(const char* msg, bool isError = false) {
     if (SerialBT.hasClient()) SerialBT.println(logBuf);
 }
 
-void IRAM_ATTR rainISR() { rain_flag = true; }
+void IRAM_ATTR rainISR() { 
+    rain_flag = true; 
+}
 
 void setPump(bool turnOn) {
     pump_status = turnOn;
@@ -69,17 +69,17 @@ void TaskSensor(void *pv) {
         esp_task_wdt_reset();
         SensorData data;
         
-        // Đọc DHT22 an toàn
+        // DHT22
         float temp = dht.readTemperature();
         float humi = dht.readHumidity();
         data.t = isnan(temp) ? -1.0 : round(temp * 10) / 10.0;
         data.h = isnan(humi) ? -1.0 : round(humi * 10) / 10.0;
 
-        // Đọc cảm biến Analog với dải 11db
+        //cảm biến Analog với dải 11db
         data.rain_p = constrain(map(analogRead(RAIN_AO), 4095, 1351, 0, 100), 0, 100);
         data.soil_p = constrain(map(analogRead(SOIL_AO), 4095, 1300, 0, 100), 0, 100);
 
-        // Đọc cảm biến Digital
+        //cảm biến Digital (vẫn lấy mẫu cơ bản để hiển thị)
         data.is_raining = (digitalRead(RAIN_DO) == LOW);
         data.is_soil_wet = (digitalRead(SOIL_DO) == LOW);
         data.is_bright = (digitalRead(LIGHT_DO) == LOW);
@@ -98,14 +98,14 @@ void TaskLogic(void *pv) {
     for (;;) {
         esp_task_wdt_reset();
         
-        // Xử lý lệnh Bluetooth / Serial
+        //lệnh Bluetooth / Serial
         if (SerialBT.available() || Serial.available()) {
             String cmd = SerialBT.available() ? SerialBT.readStringUntil('\n') : Serial.readStringUntil('\n');
             cmd.trim();
             if (cmd.length() > 0) {
                 if (cmd.indexOf("PUMP:ON") >= 0 || cmd.indexOf("PUMP_ON") >= 0) {
                     // Chỉ cho phép bật nếu trời KHÔNG mưa
-                    if (digitalRead(RAIN_DO) == HIGH && !rain_flag) setPump(true);
+                    if (digitalRead(RAIN_DO) == HIGH) setPump(true);
                     else sendLog("Khóa bơm: Đang có mưa!", true);
                 }
                 else if (cmd.indexOf("PUMP:OFF") >= 0 || cmd.indexOf("PUMP_OFF") >= 0) {
@@ -114,15 +114,20 @@ void TaskLogic(void *pv) {
             }
         }
 
-        // Kiểm tra an toàn từ dữ liệu cảm biến
+        // Kiểm tra an toàn từ dữ liệu cảm biến & ngắt
         if (sensorQueue != NULL && xQueuePeek(sensorQueue, &rx, pdMS_TO_TICKS(500))) {
-            if (rx.is_raining || rain_flag) {
-                if (pump_status) {
-                    setPump(false);
-                    sendLog("Tự động ngắt bơm do phát hiện mưa!", true);
+            // Tôn trọng ngắt phần cứng đã được kích
+            if (rain_flag || rx.is_raining) {
+                //Debounce
+                vTaskDelay(pdMS_TO_TICKS(30));
+                if (digitalRead(RAIN_DO) == LOW) { // Chỉ ngắt khi LOW sau 30ms
+                    if (pump_status) {
+                        setPump(false);
+                        sendLog("Quản lý Ngắt: Tự động tắt bơm do mưa!", true);
+                    }
                 }
+                rain_flag = false; // Xóa cờ ngắt
             }
-            if (digitalRead(RAIN_DO) == HIGH) rain_flag = false;
         }
         vTaskDelay(pdMS_TO_TICKS(200)); 
     }
@@ -157,13 +162,12 @@ void TaskComm(void *pv) {
     }
 }
 
-// --- 3. SETUP: KHỞI TẠO HỆ THỐNG ---
+// ---SETUP: KHỞI TẠO HỆ THỐNG ---
 void setup() {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
     Serial.begin(115200);
     SerialBT.begin("ESP32_VUON_RAU_RTOS");
 
-    // QUAN TRỌNG: Khởi tạo Queue trước khi tạo Task để tránh Reset 0xc
     sensorQueue = xQueueCreate(1, sizeof(SensorData));
 
     analogSetAttenuation(ADC_11db);
@@ -173,12 +177,12 @@ void setup() {
     pinMode(SOIL_DO, INPUT_PULLUP);
     pinMode(PUMP_PIN, OUTPUT);
 
-    // Khôi phục trạng thái NVS (Trí nhớ máy bơm)
+    // Khôi phục trạng thái NVS
     prefs.begin("garden", false);
     pump_status = prefs.getBool("last_p_state", false);
     setPump(pump_status);
 
-    // Watchdog & Ngắt ngoài
+    // Watchdog & Cài đặt Ngắt ngoài (Hardware Interrupt)
     esp_task_wdt_init(WDT_TIMEOUT, true);
     attachInterrupt(digitalPinToInterrupt(RAIN_DO), rainISR, FALLING);
 
@@ -191,6 +195,5 @@ void setup() {
 }
 
 void loop() { 
-    // Trong RTOS, loop chính được giải phóng để giảm tải CPU
     vTaskDelete(NULL); 
 }
