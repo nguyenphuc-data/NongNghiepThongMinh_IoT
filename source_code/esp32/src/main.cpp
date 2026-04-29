@@ -67,6 +67,7 @@ void TaskSensor(void *pv) {
     esp_task_wdt_add(NULL);
     for (;;) {
         esp_task_wdt_reset();
+        Serial.printf("[CORE 0] Đang lấy mẫu cảm biến...\n");
         SensorData data;
         
         // DHT22
@@ -100,6 +101,7 @@ void TaskLogic(void *pv) {
         
         //lệnh Bluetooth / Serial
         if (SerialBT.available() || Serial.available()) {
+            Serial.printf("[CORE 1] Phát hiện lệnh điều khiển mới!\n");
             String cmd = SerialBT.available() ? SerialBT.readStringUntil('\n') : Serial.readStringUntil('\n');
             cmd.trim();
             if (cmd.length() > 0) {
@@ -118,6 +120,7 @@ void TaskLogic(void *pv) {
         if (sensorQueue != NULL && xQueuePeek(sensorQueue, &rx, pdMS_TO_TICKS(500))) {
             // Tôn trọng ngắt phần cứng đã được kích
             if (rain_flag || rx.is_raining) {
+                Serial.printf("[CORE 1] NHẬN TÍN HIỆU NGẮT (ISR) - Kiểm tra mưa...\n");
                 //Debounce
                 vTaskDelay(pdMS_TO_TICKS(30));
                 if (digitalRead(RAIN_DO) == LOW) { // Chỉ ngắt khi LOW sau 30ms
@@ -142,7 +145,7 @@ void TaskComm(void *pv) {
         if (sensorQueue != NULL && xQueuePeek(sensorQueue, &rx, pdMS_TO_TICKS(1000))) {
             StaticJsonDocument<512> doc;
             char tStr[15]; getUptimeStr(tStr);
-            
+            Serial.printf("[CORE 1] Đang đóng gói và gửi JSON (Chu kỳ 5s)...\n");
             doc["uptime"] = tStr;
             doc["temp"] = rx.t;
             doc["hum"] = rx.h;
